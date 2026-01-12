@@ -1,0 +1,24 @@
+[package]
+name = "tui-explorer-rs"
+version = "0.1.0"
+edition = "2024"
+description = "A modern, fast terminal file explorer with mouse support"
+readme = "README.md"
+license = "MIT"
+keywords = ["tui", "terminal", "file-manager", "explorer", "cli"]
+categories = ["command-line-utilities", "filesystem"]
+repository = "https://github.com/yourusername/tui-explorer-rs"
+
+[[bin]]
+name = "te"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.29.0"
+ratatui = "0.30.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
