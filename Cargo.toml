@@ -14,8 +14,12 @@ name = "te"
 path = "src/main.rs"
 
 [dependencies]
+arboard = "3.6.1"
 crossterm = "0.29.0"
 ratatui = "0.30.0"
+ratatui-image = { version = "10.0.2", default-features = false, features = ["crossterm", "image-defaults"] }
+image = "0.25.9"
+base64 = "0.22.1"
 
 [profile.release]
 lto = true
