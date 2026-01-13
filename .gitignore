@@ -4,5 +4,8 @@ Cargo.lock
 *.swo
 .DS_Store
 
+.env
+.env.*
+
 /bin/
 /AGENTS.md

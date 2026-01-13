@@ -1,5 +1,6 @@
 use ratatui::widgets::ListState;
 use std::{
+    collections::BTreeSet,
     io,
     path::{Path, PathBuf},
     process::Command,
@@ -7,6 +8,7 @@ use std::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GitSection {
+    All,
     Working,
     Staged,
     Untracked,
@@ -40,6 +42,8 @@ pub struct GitState {
     pub entries: Vec<GitFileEntry>,
     pub filtered: Vec<usize>,
     pub list_state: ListState,
+    pub selected_paths: BTreeSet<String>,
+    pub selection_anchor: Option<usize>,
 
     pub diff_mode: GitDiffMode,
     pub diff_lines: Vec<String>,
@@ -54,10 +58,12 @@ impl GitState {
             branch: String::new(),
             ahead: 0,
             behind: 0,
-            section: GitSection::Working,
+            section: GitSection::All,
             entries: Vec::new(),
             filtered: Vec::new(),
             list_state: ListState::default(),
+            selected_paths: BTreeSet::new(),
+            selection_anchor: None,
             diff_mode: GitDiffMode::SideBySide,
             diff_lines: Vec::new(),
             diff_scroll_y: 0,
@@ -72,6 +78,9 @@ impl GitState {
         self.behind = 0;
         self.entries.clear();
         self.filtered.clear();
+        self.list_state.select(None);
+        self.selected_paths.clear();
+        self.selection_anchor = None;
         self.diff_lines.clear();
         self.diff_scroll_y = 0;
         self.diff_scroll_x = 0;
@@ -212,10 +221,12 @@ impl GitState {
 
     fn update_filtered(&mut self) {
         self.filtered.clear();
+
         for (idx, e) in self.entries.iter().enumerate() {
             let staged = e.x != ' ' && e.x != '?';
             let unstaged = e.y != ' ' && e.y != '?';
             let keep = match self.section {
+                GitSection::All => true,
                 GitSection::Working => unstaged && !e.is_conflict && !e.is_untracked,
                 GitSection::Staged => staged && !e.is_conflict && !e.is_untracked,
                 GitSection::Untracked => e.is_untracked,
@@ -224,6 +235,16 @@ impl GitState {
             if keep {
                 self.filtered.push(idx);
             }
+        }
+
+        if self.section == GitSection::All {
+            self.filtered.sort_by(|a, b| {
+                let ea = &self.entries[*a];
+                let eb = &self.entries[*b];
+                let pa = entry_sort_key(ea);
+                let pb = entry_sort_key(eb);
+                pa.cmp(&pb)
+            });
         }
 
         let selected = self.list_state.selected().unwrap_or(0);
@@ -310,7 +331,19 @@ impl GitState {
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> io::Result<std::process::Output> {
-    Command::new("git").arg("-C").arg(cwd).args(args).output()
+    Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("GIT_PAGER", "cat")
+        .env("PAGER", "cat")
+        .env("GIT_EDITOR", ":")
+        .env("EDITOR", ":")
+        .env("GIT_SEQUENCE_EDITOR", ":")
+        .env("GIT_MERGE_AUTOEDIT", "no")
+        .output()
 }
 
 fn is_conflict_status(x: char, y: char) -> bool {
@@ -318,6 +351,26 @@ fn is_conflict_status(x: char, y: char) -> bool {
         (x, y),
         ('U', 'U') | ('A', 'A') | ('D', 'D') | ('A', 'U') | ('U', 'A') | ('D', 'U') | ('U', 'D')
     )
+}
+
+fn entry_sort_key(e: &GitFileEntry) -> (u8, String) {
+    if e.is_conflict {
+        return (0, e.path.clone());
+    }
+    if e.is_untracked {
+        return (3, e.path.clone());
+    }
+
+    let staged = e.x != ' ' && e.x != '?';
+    let unstaged = e.y != ' ' && e.y != '?';
+
+    if staged {
+        (1, e.path.clone())
+    } else if unstaged {
+        (2, e.path.clone())
+    } else {
+        (4, e.path.clone())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
