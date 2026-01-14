@@ -49,25 +49,153 @@ use highlight::{Highlighter, new_highlighter};
 
 mod theme {
     use ratatui::style::Color;
+    use serde::{Deserialize, Serialize};
 
-    pub const BG: Color = Color::Rgb(30, 30, 46);
-    pub const FG: Color = Color::Rgb(205, 214, 244);
-    pub const ACCENT_PRIMARY: Color = Color::Rgb(203, 166, 247);
-    pub const ACCENT_SECONDARY: Color = Color::Rgb(250, 179, 135);
-    pub const ACCENT_TERTIARY: Color = Color::Rgb(137, 180, 250);
-    pub const BORDER_INACTIVE: Color = Color::Rgb(88, 91, 112);
-    pub const SELECTION_BG: Color = Color::Rgb(69, 71, 90);
-    pub const DIR_COLOR: Color = Color::Rgb(137, 180, 250);
-    pub const EXE_COLOR: Color = Color::Rgb(166, 227, 161);
-    pub const SIZE_COLOR: Color = Color::Rgb(147, 153, 178);
-    pub const BTN_BG: Color = Color::Rgb(243, 139, 168);
-    pub const BTN_FG: Color = Color::Rgb(24, 24, 37);
-    pub const MENU_BG: Color = Color::Rgb(49, 50, 68);
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum Theme {
+        Mocha,
+        TokyoNightStorm,
+        GruvboxDarkHard,
+        Nord,
+        Dracula,
+    }
 
-    pub const DIFF_ADD_BG: Color = Color::Rgb(72, 104, 88);
-    pub const DIFF_DEL_BG: Color = Color::Rgb(110, 70, 92);
-    pub const DIFF_HUNK_BG: Color = Color::Rgb(74, 78, 116);
+    impl Theme {
+        pub fn label(self) -> &'static str {
+            match self {
+                Theme::Mocha => "Mocha",
+                Theme::TokyoNightStorm => "Tokyo Night",
+                Theme::GruvboxDarkHard => "Gruvbox",
+                Theme::Nord => "Nord",
+                Theme::Dracula => "Dracula",
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct Palette {
+        pub bg: Color,
+        pub fg: Color,
+        pub accent_primary: Color,
+        pub accent_secondary: Color,
+        pub accent_tertiary: Color,
+        pub border_inactive: Color,
+        pub selection_bg: Color,
+        pub dir_color: Color,
+        pub exe_color: Color,
+        pub size_color: Color,
+        pub btn_bg: Color,
+        pub btn_fg: Color,
+        pub menu_bg: Color,
+        pub diff_add_bg: Color,
+        pub diff_del_bg: Color,
+        pub diff_hunk_bg: Color,
+    }
+
+    pub fn palette(theme: Theme) -> Palette {
+        match theme {
+            Theme::Mocha => Palette {
+                bg: Color::Rgb(30, 30, 46),
+                fg: Color::Rgb(205, 214, 244),
+                accent_primary: Color::Rgb(203, 166, 247),
+                accent_secondary: Color::Rgb(250, 179, 135),
+                accent_tertiary: Color::Rgb(137, 180, 250),
+                border_inactive: Color::Rgb(88, 91, 112),
+                selection_bg: Color::Rgb(69, 71, 90),
+                dir_color: Color::Rgb(137, 180, 250),
+                exe_color: Color::Rgb(166, 227, 161),
+                size_color: Color::Rgb(147, 153, 178),
+                btn_bg: Color::Rgb(243, 139, 168),
+                btn_fg: Color::Rgb(24, 24, 37),
+                menu_bg: Color::Rgb(49, 50, 68),
+                diff_add_bg: Color::Rgb(72, 104, 88),
+                diff_del_bg: Color::Rgb(110, 70, 92),
+                diff_hunk_bg: Color::Rgb(74, 78, 116),
+            },
+            Theme::TokyoNightStorm => Palette {
+                bg: Color::Rgb(36, 40, 59),
+                fg: Color::Rgb(192, 202, 245),
+                accent_primary: Color::Rgb(122, 162, 247),
+                accent_secondary: Color::Rgb(255, 158, 100),
+                accent_tertiary: Color::Rgb(187, 154, 247),
+                border_inactive: Color::Rgb(65, 72, 104),
+                selection_bg: Color::Rgb(46, 60, 100),
+                dir_color: Color::Rgb(122, 162, 247),
+                exe_color: Color::Rgb(158, 206, 106),
+                size_color: Color::Rgb(86, 95, 137),
+                btn_bg: Color::Rgb(247, 118, 142),
+                btn_fg: Color::Rgb(24, 24, 37),
+                menu_bg: Color::Rgb(45, 49, 71),
+                diff_add_bg: Color::Rgb(56, 83, 76),
+                diff_del_bg: Color::Rgb(90, 60, 75),
+                diff_hunk_bg: Color::Rgb(60, 65, 100),
+            },
+            Theme::GruvboxDarkHard => Palette {
+                bg: Color::Rgb(29, 32, 33),
+                fg: Color::Rgb(235, 219, 178),
+                accent_primary: Color::Rgb(250, 189, 47),
+                accent_secondary: Color::Rgb(214, 93, 14),
+                accent_tertiary: Color::Rgb(131, 165, 152),
+                border_inactive: Color::Rgb(80, 73, 69),
+                selection_bg: Color::Rgb(60, 56, 54),
+                dir_color: Color::Rgb(131, 165, 152),
+                exe_color: Color::Rgb(184, 187, 38),
+                size_color: Color::Rgb(146, 131, 116),
+                btn_bg: Color::Rgb(251, 73, 52),
+                btn_fg: Color::Rgb(29, 32, 33),
+                menu_bg: Color::Rgb(50, 48, 47),
+                diff_add_bg: Color::Rgb(54, 69, 54),
+                diff_del_bg: Color::Rgb(78, 53, 53),
+                diff_hunk_bg: Color::Rgb(69, 64, 74),
+            },
+            Theme::Nord => Palette {
+                bg: Color::Rgb(46, 52, 64),
+                fg: Color::Rgb(216, 222, 233),
+                accent_primary: Color::Rgb(136, 192, 208),
+                accent_secondary: Color::Rgb(235, 203, 139),
+                accent_tertiary: Color::Rgb(180, 142, 173),
+                border_inactive: Color::Rgb(76, 86, 106),
+                selection_bg: Color::Rgb(67, 76, 94),
+                dir_color: Color::Rgb(129, 161, 193),
+                exe_color: Color::Rgb(163, 190, 140),
+                size_color: Color::Rgb(76, 86, 106),
+                btn_bg: Color::Rgb(191, 97, 106),
+                btn_fg: Color::Rgb(46, 52, 64),
+                menu_bg: Color::Rgb(59, 66, 82),
+                diff_add_bg: Color::Rgb(58, 76, 74),
+                diff_del_bg: Color::Rgb(87, 63, 72),
+                diff_hunk_bg: Color::Rgb(67, 76, 94),
+            },
+            Theme::Dracula => Palette {
+                bg: Color::Rgb(40, 42, 54),
+                fg: Color::Rgb(248, 248, 242),
+                accent_primary: Color::Rgb(189, 147, 249),
+                accent_secondary: Color::Rgb(139, 233, 253),
+                accent_tertiary: Color::Rgb(255, 121, 198),
+                border_inactive: Color::Rgb(98, 114, 164),
+                selection_bg: Color::Rgb(68, 71, 90),
+                dir_color: Color::Rgb(139, 233, 253),
+                exe_color: Color::Rgb(80, 250, 123),
+                size_color: Color::Rgb(98, 114, 164),
+                btn_bg: Color::Rgb(255, 85, 85),
+                btn_fg: Color::Rgb(40, 42, 54),
+                menu_bg: Color::Rgb(68, 71, 90),
+                diff_add_bg: Color::Rgb(60, 92, 72),
+                diff_del_bg: Color::Rgb(92, 60, 72),
+                diff_hunk_bg: Color::Rgb(65, 68, 96),
+            },
+        }
+    }
 }
+
+const THEME_ORDER: [theme::Theme; 5] = [
+    theme::Theme::Mocha,
+    theme::Theme::TokyoNightStorm,
+    theme::Theme::GruvboxDarkHard,
+    theme::Theme::Nord,
+    theme::Theme::Dracula,
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tab {
@@ -88,6 +216,7 @@ enum GitFooterAction {
 enum AppAction {
     SwitchTab(Tab),
     RefreshGit,
+    OpenCommandPalette,
     Navigate(PathBuf),
     EnterDir,
     GoParent,
@@ -223,6 +352,8 @@ struct GitLogEntry {
 struct PersistedUiSettings {
     #[serde(default)]
     log_left_width: Option<u16>,
+    #[serde(default)]
+    theme: Option<theme::Theme>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -421,6 +552,63 @@ impl OperationPopup {
     }
 }
 
+struct ThemePickerUi {
+    open: bool,
+    list_state: ListState,
+}
+
+impl ThemePickerUi {
+    fn new() -> Self {
+        Self {
+            open: false,
+            list_state: ListState::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandId {
+    ToggleHidden,
+    ToggleWrapDiff,
+    ToggleSyntaxHighlight,
+    SelectTheme,
+    RefreshGit,
+    GitFetch,
+    GitPullRebase,
+    GitPush,
+    OpenBranchPicker,
+    ClearGitLog,
+    Quit,
+}
+
+const COMMAND_PALETTE_ITEMS: &[(CommandId, &str)] = &[
+    (CommandId::ToggleHidden, "Toggle hidden files"),
+    (CommandId::ToggleWrapDiff, "Toggle diff wrap"),
+    (CommandId::ToggleSyntaxHighlight, "Toggle syntax highlight"),
+    (CommandId::SelectTheme, "Select theme…"),
+    (CommandId::RefreshGit, "Git: refresh status"),
+    (CommandId::OpenBranchPicker, "Checkout branch…"),
+    (CommandId::GitFetch, "Git: fetch --prune"),
+    (CommandId::GitPullRebase, "Git: pull --rebase"),
+    (CommandId::GitPush, "Git: push"),
+    (CommandId::ClearGitLog, "Clear git command log"),
+    (CommandId::Quit, "Quit"),
+];
+
+struct CommandPaletteUi {
+    open: bool,
+    list_state: ListState,
+}
+
+impl CommandPaletteUi {
+    fn new() -> Self {
+        Self {
+            open: false,
+            list_state: ListState::default(),
+        }
+    }
+}
+
 enum JobResult {
     Git {
         cmd: String,
@@ -480,11 +668,16 @@ struct App {
     pending_job: Option<PendingJob>,
     discard_confirm: Option<DiscardConfirm>,
     operation_popup: Option<OperationPopup>,
+    theme_picker: ThemePickerUi,
+    command_palette: CommandPaletteUi,
     git_log: VecDeque<GitLogEntry>,
     log_ui: LogUi,
 
     wrap_diff: bool,
     syntax_highlight: bool,
+
+    theme: theme::Theme,
+    palette: theme::Palette,
 
     explorer_preview_x: u16,
     git_diff_x: u16,
@@ -530,11 +723,16 @@ impl App {
             pending_job: None,
             discard_confirm: None,
             operation_popup: None,
+            theme_picker: ThemePickerUi::new(),
+            command_palette: CommandPaletteUi::new(),
             git_log: VecDeque::new(),
             log_ui: LogUi::new(),
 
             wrap_diff: true,
             syntax_highlight: true,
+
+            theme: theme::Theme::Mocha,
+            palette: theme::palette(theme::Theme::Mocha),
 
             explorer_preview_x: 0,
             git_diff_x: 0,
@@ -1696,6 +1894,156 @@ impl App {
         self.status_message = Some((msg.into(), Instant::now()));
     }
 
+    fn set_theme(&mut self, theme: theme::Theme) {
+        self.theme = theme;
+        self.palette = theme::palette(theme);
+    }
+
+    fn open_theme_picker(&mut self) {
+        if self.theme_picker.open {
+            self.theme_picker.open = false;
+            return;
+        }
+
+        self.context_menu = None;
+        self.pending_menu_action = None;
+        self.command_palette.open = false;
+
+        let current = THEME_ORDER
+            .iter()
+            .position(|t| *t == self.theme)
+            .unwrap_or(0);
+        self.theme_picker.open = true;
+        self.theme_picker.list_state.select(Some(current));
+    }
+
+    fn close_theme_picker(&mut self) {
+        self.theme_picker.open = false;
+    }
+
+    fn move_theme_picker(&mut self, delta: i32) {
+        let len = THEME_ORDER.len();
+        if len == 0 {
+            self.theme_picker.list_state.select(None);
+            return;
+        }
+
+        let cur = self.theme_picker.list_state.selected().unwrap_or(0) as i32;
+        let next = (cur + delta).rem_euclid(len as i32) as usize;
+        self.theme_picker.list_state.select(Some(next));
+    }
+
+    fn apply_theme_picker_selection(&mut self) {
+        let Some(idx) = self.theme_picker.list_state.selected() else {
+            return;
+        };
+        let Some(theme) = THEME_ORDER.get(idx).copied() else {
+            return;
+        };
+
+        self.set_theme(theme);
+        self.save_persisted_ui_settings();
+        self.set_status(format!("Theme: {}", theme.label()));
+        self.close_theme_picker();
+    }
+
+    fn open_command_palette(&mut self) {
+        if self.operation_popup.is_some()
+            || self.discard_confirm.is_some()
+            || self.branch_ui.open
+            || self.log_ui.inspect.open
+        {
+            return;
+        }
+
+        if self.command_palette.open {
+            self.command_palette.open = false;
+            return;
+        }
+
+        self.context_menu = None;
+        self.pending_menu_action = None;
+        self.theme_picker.open = false;
+
+        self.command_palette.open = true;
+        self.command_palette.list_state.select(Some(0));
+    }
+
+    fn close_command_palette(&mut self) {
+        self.command_palette.open = false;
+    }
+
+    fn move_command_palette(&mut self, delta: i32) {
+        let len = COMMAND_PALETTE_ITEMS.len();
+        if len == 0 {
+            self.command_palette.list_state.select(None);
+            return;
+        }
+
+        let cur = self.command_palette.list_state.selected().unwrap_or(0) as i32;
+        let next = (cur + delta).rem_euclid(len as i32) as usize;
+        self.command_palette.list_state.select(Some(next));
+    }
+
+    fn run_command_palette_selection(&mut self) {
+        let Some(idx) = self.command_palette.list_state.selected() else {
+            return;
+        };
+        let Some((cmd, _)) = COMMAND_PALETTE_ITEMS.get(idx).copied() else {
+            return;
+        };
+        self.close_command_palette();
+        self.run_command(cmd);
+    }
+
+    fn run_command(&mut self, cmd: CommandId) {
+        match cmd {
+            CommandId::ToggleHidden => {
+                self.show_hidden = !self.show_hidden;
+                self.load_files();
+                self.set_status(if self.show_hidden {
+                    "Hidden files: shown"
+                } else {
+                    "Hidden files: hidden"
+                });
+            }
+            CommandId::ToggleWrapDiff => {
+                self.wrap_diff = !self.wrap_diff;
+                self.set_status(if self.wrap_diff {
+                    "Diff wrap: on"
+                } else {
+                    "Diff wrap: off"
+                });
+            }
+            CommandId::ToggleSyntaxHighlight => {
+                self.syntax_highlight = !self.syntax_highlight;
+                self.set_status(if self.syntax_highlight {
+                    "Syntax highlight: on"
+                } else {
+                    "Syntax highlight: off"
+                });
+            }
+            CommandId::SelectTheme => {
+                self.open_theme_picker();
+            }
+            CommandId::RefreshGit => {
+                self.refresh_git_state();
+                self.set_status("Git refreshed");
+            }
+            CommandId::GitFetch => self.start_operation_job("git fetch --prune", true),
+            CommandId::GitPullRebase => self.start_operation_job("git pull --rebase", true),
+            CommandId::GitPush => self.start_operation_job("git push", true),
+            CommandId::OpenBranchPicker => self.open_branch_picker(),
+            CommandId::ClearGitLog => {
+                self.git_log.clear();
+                self.log_ui.command_state.select(None);
+                self.log_ui.diff_lines.clear();
+                self.set_status("Commands cleared");
+            }
+            CommandId::Quit => self.should_quit = true,
+        }
+    }
+
     fn maybe_expire_status(&mut self) {
         let should_clear = self
             .status_message
@@ -1821,6 +2169,10 @@ impl App {
         if let Some(w) = settings.log_left_width {
             self.log_ui.left_width = w.clamp(32, 90);
         }
+
+        if let Some(theme) = settings.theme {
+            self.set_theme(theme);
+        }
     }
 
     fn save_persisted_ui_settings(&mut self) {
@@ -1830,6 +2182,7 @@ impl App {
 
         let settings = PersistedUiSettings {
             log_left_width: Some(self.log_ui.left_width),
+            theme: Some(self.theme),
         };
 
         let content = match serde_json::to_string(&settings) {
@@ -1993,6 +2346,9 @@ impl App {
             AppAction::RefreshGit => {
                 self.refresh_git_state();
                 self.set_status("Git refreshed");
+            }
+            AppAction::OpenCommandPalette => {
+                self.open_command_palette();
             }
             AppAction::Navigate(path) => self.navigate_to(path),
             AppAction::EnterDir => self.enter_selected(),
@@ -2908,7 +3264,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
     let mut zones = Vec::new();
     let area = f.area();
 
-    f.render_widget(Block::default().bg(theme::BG), area);
+    f.render_widget(Block::default().bg(app.palette.bg), area);
 
     let main_layout = if app.current_tab == Tab::Git {
         let commit_h = if app.commit.open { 11 } else { 1 };
@@ -2940,9 +3296,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         (None, main_layout[2])
     };
 
-    let top_block = Block::default()
-        .borders(Borders::BOTTOM)
-        .border_style(Style::default().fg(theme::BORDER_INACTIVE).bg(theme::BG));
+    let top_block = Block::default().borders(Borders::BOTTOM).border_style(
+        Style::default()
+            .fg(app.palette.border_inactive)
+            .bg(app.palette.bg),
+    );
     f.render_widget(top_block.clone(), top_bar);
 
     let tabs_y = top_bar.y;
@@ -2956,11 +3314,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         let is_active = app.current_tab == tab;
         let style = if is_active {
             Style::default()
-                .bg(theme::ACCENT_PRIMARY)
-                .fg(theme::BTN_FG)
+                .bg(app.palette.accent_primary)
+                .fg(app.palette.btn_fg)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().bg(theme::BG).fg(theme::FG)
+            Style::default().bg(app.palette.bg).fg(app.palette.fg)
         };
         f.render_widget(
             Paragraph::new(label).style(style),
@@ -2985,7 +3343,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             f.render_widget(
                 Paragraph::new(Span::styled(
                     home_txt,
-                    Style::default().fg(theme::ACCENT_SECONDARY).bold(),
+                    Style::default().fg(app.palette.accent_secondary).bold(),
                 )),
                 Rect::new(breadcrumb_x, breadcrumb_y, home_width, 1),
             );
@@ -3025,10 +3383,10 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                 let style = if i == components.len() - 1 {
                     Style::default()
-                        .fg(theme::ACCENT_PRIMARY)
+                        .fg(app.palette.accent_primary)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme::FG)
+                    Style::default().fg(app.palette.fg)
                 };
 
                 f.render_widget(
@@ -3046,7 +3404,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     f.render_widget(
                         Paragraph::new(Span::styled(
                             " › ",
-                            Style::default().fg(theme::BORDER_INACTIVE),
+                            Style::default().fg(app.palette.border_inactive),
                         )),
                         Rect::new(breadcrumb_x, breadcrumb_y, 3, 1),
                     );
@@ -3089,7 +3447,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             spans.push(Span::styled(
                 branch_text.clone(),
                 Style::default()
-                    .fg(theme::ACCENT_SECONDARY)
+                    .fg(app.palette.accent_secondary)
                     .add_modifier(Modifier::BOLD),
             ));
             zones.push(ClickZone {
@@ -3103,7 +3461,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             )));
 
             f.render_widget(
-                Paragraph::new(Line::from(spans)).style(Style::default().fg(theme::FG)),
+                Paragraph::new(Line::from(spans)).style(Style::default().fg(app.palette.fg)),
                 Rect::new(base_x, second_row_y, width, 1),
             );
 
@@ -3124,18 +3482,22 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                         (
                             "[Continue]",
                             AppAction::MergeContinue,
-                            theme::ACCENT_TERTIARY,
+                            app.palette.accent_tertiary,
                         ),
-                        ("[Abort]", AppAction::MergeAbort, theme::BTN_BG),
+                        ("[Abort]", AppAction::MergeAbort, app.palette.btn_bg),
                     ],
                     GitOperation::Rebase => vec![
                         (
                             "[Continue]",
                             AppAction::RebaseContinue,
-                            theme::ACCENT_TERTIARY,
+                            app.palette.accent_tertiary,
                         ),
-                        ("[Skip]", AppAction::RebaseSkip, theme::ACCENT_SECONDARY),
-                        ("[Abort]", AppAction::RebaseAbort, theme::BTN_BG),
+                        (
+                            "[Skip]",
+                            AppAction::RebaseSkip,
+                            app.palette.accent_secondary,
+                        ),
+                        ("[Abort]", AppAction::RebaseAbort, app.palette.btn_bg),
                     ],
                 };
 
@@ -3147,8 +3509,16 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     let x = cursor.saturating_sub(w);
                     let rect = Rect::new(x, second_row_y, w, 1);
                     let style = Style::default()
-                        .bg(if enabled { bg } else { theme::BORDER_INACTIVE })
-                        .fg(if enabled { theme::BTN_FG } else { theme::FG })
+                        .bg(if enabled {
+                            bg
+                        } else {
+                            app.palette.border_inactive
+                        })
+                        .fg(if enabled {
+                            app.palette.btn_fg
+                        } else {
+                            app.palette.fg
+                        })
                         .add_modifier(Modifier::BOLD);
                     f.render_widget(Paragraph::new(label).style(style), rect);
                     if enabled {
@@ -3160,9 +3530,13 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             if app.git.repo_root.is_some() {
                 for (label, action, bg) in [
-                    ("[Push]", AppAction::GitPush, theme::ACCENT_SECONDARY),
-                    ("[Pull]", AppAction::GitPullRebase, theme::ACCENT_TERTIARY),
-                    ("[Fetch]", AppAction::GitFetch, theme::ACCENT_PRIMARY),
+                    ("[Push]", AppAction::GitPush, app.palette.accent_secondary),
+                    (
+                        "[Pull]",
+                        AppAction::GitPullRebase,
+                        app.palette.accent_tertiary,
+                    ),
+                    ("[Fetch]", AppAction::GitFetch, app.palette.accent_primary),
                 ] {
                     let w = label.len() as u16;
                     if cursor <= top_bar.x + 2 + w {
@@ -3171,8 +3545,16 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     let x = cursor.saturating_sub(w);
                     let rect = Rect::new(x, second_row_y, w, 1);
                     let style = Style::default()
-                        .bg(if enabled { bg } else { theme::BORDER_INACTIVE })
-                        .fg(if enabled { theme::BTN_FG } else { theme::FG })
+                        .bg(if enabled {
+                            bg
+                        } else {
+                            app.palette.border_inactive
+                        })
+                        .fg(if enabled {
+                            app.palette.btn_fg
+                        } else {
+                            app.palette.fg
+                        })
                         .add_modifier(Modifier::BOLD);
                     f.render_widget(Paragraph::new(label).style(style), rect);
                     if enabled {
@@ -3191,7 +3573,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let label = format!(" Git Log: {} ", sub);
             let width = label.len() as u16;
             f.render_widget(
-                Paragraph::new(label).style(Style::default().fg(theme::FG)),
+                Paragraph::new(label).style(Style::default().fg(app.palette.fg)),
                 Rect::new(top_bar.x + 2, second_row_y, width, 1),
             );
         }
@@ -3210,9 +3592,9 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let sidebar_area = content_chunks[0];
             let sidebar_block = Block::default()
                 .borders(Borders::RIGHT)
-                .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                .border_style(Style::default().fg(app.palette.border_inactive))
                 .title(" Places ")
-                .title_style(Style::default().fg(theme::ACCENT_TERTIARY));
+                .title_style(Style::default().fg(app.palette.accent_tertiary));
             f.render_widget(sidebar_block, sidebar_area);
 
             let mut place_y = sidebar_area.y + 1;
@@ -3225,10 +3607,10 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                 let style = if is_active {
                     Style::default()
-                        .fg(theme::ACCENT_SECONDARY)
+                        .fg(app.palette.accent_secondary)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme::FG)
+                    Style::default().fg(app.palette.fg)
                 };
 
                 let label = format!("  {}", name);
@@ -3248,7 +3630,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let list_block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+                .border_style(Style::default().fg(app.palette.accent_primary))
                 .title(format!(" Files ({}) ", app.files.len()));
 
             let items: Vec<ListItem> = app
@@ -3268,11 +3650,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     };
 
                     let color = if file.is_dir {
-                        theme::DIR_COLOR
+                        app.palette.dir_color
                     } else if file.is_exec {
-                        theme::EXE_COLOR
+                        app.palette.exe_color
                     } else {
-                        theme::FG
+                        app.palette.fg
                     };
 
                     let name_span = Span::styled(&file.name, Style::default().fg(color));
@@ -3281,7 +3663,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     if !file.is_dir {
                         spans.push(Span::styled(
                             format!(" ({})", format_size(file.size)),
-                            Style::default().fg(theme::SIZE_COLOR),
+                            Style::default().fg(app.palette.size_color),
                         ));
                     }
 
@@ -3293,7 +3675,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 .block(list_block)
                 .highlight_style(
                     Style::default()
-                        .bg(theme::SELECTION_BG)
+                        .bg(app.palette.selection_bg)
                         .add_modifier(Modifier::BOLD),
                 )
                 .highlight_symbol("▎ ");
@@ -3385,7 +3767,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 return None;
                             }
                             f.path.extension().and_then(|s| s.to_str()).and_then(|ext| {
-                                highlight::highlight_text(&preview_text, ext, theme::BG)
+                                highlight::highlight_text(&preview_text, ext, app.palette.bg)
                             })
                         })
                         .unwrap_or_else(|| preview_text.lines().map(Line::raw).collect())
@@ -3395,7 +3777,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let p_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(" Preview ");
 
                 let para = Paragraph::new(lines)
@@ -3434,7 +3816,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let sections_block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+                .border_style(Style::default().fg(app.palette.accent_primary))
                 .title(" Changes ");
             f.render_widget(sections_block.clone(), sections_area);
 
@@ -3477,11 +3859,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let is_active = app.git.section == *sec;
                 let style = if is_active {
                     Style::default()
-                        .bg(theme::SELECTION_BG)
+                        .bg(app.palette.selection_bg)
                         .add_modifier(Modifier::BOLD)
-                        .fg(theme::FG)
+                        .fg(app.palette.fg)
                 } else {
-                    Style::default().fg(theme::FG)
+                    Style::default().fg(app.palette.fg)
                 };
                 let rect = Rect::new(
                     section_inner.x,
@@ -3499,7 +3881,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let files_block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                .border_style(Style::default().fg(app.palette.border_inactive))
                 .title(" Files ");
 
             let file_items: Vec<ListItem> = app
@@ -3526,30 +3908,30 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     };
 
                     let status_style = match status.as_str() {
-                        "M" => Style::default().fg(theme::ACCENT_SECONDARY),
-                        "A" => Style::default().fg(theme::EXE_COLOR),
-                        "D" => Style::default().fg(theme::BTN_BG),
-                        "??" => Style::default().fg(theme::ACCENT_TERTIARY),
-                        _ => Style::default().fg(theme::FG),
+                        "M" => Style::default().fg(app.palette.accent_secondary),
+                        "A" => Style::default().fg(app.palette.exe_color),
+                        "D" => Style::default().fg(app.palette.btn_bg),
+                        "??" => Style::default().fg(app.palette.accent_tertiary),
+                        _ => Style::default().fg(app.palette.fg),
                     };
 
                     let checkbox = if is_selected { "▣ " } else { "□ " };
 
                     let mut spans = vec![
-                        Span::styled(checkbox, Style::default().fg(theme::BORDER_INACTIVE)),
+                        Span::styled(checkbox, Style::default().fg(app.palette.border_inactive)),
                         Span::styled(format!("{:>2} ", status), status_style),
-                        Span::styled(e.path.as_str(), Style::default().fg(theme::FG)),
+                        Span::styled(e.path.as_str(), Style::default().fg(app.palette.fg)),
                     ];
                     if let Some(from) = &e.renamed_from {
                         spans.push(Span::styled(
                             format!(" (from {})", from),
-                            Style::default().fg(theme::BORDER_INACTIVE),
+                            Style::default().fg(app.palette.border_inactive),
                         ));
                     }
 
                     let mut item = ListItem::new(Line::from(spans));
                     if is_selected {
-                        item = item.style(Style::default().bg(theme::MENU_BG));
+                        item = item.style(Style::default().bg(app.palette.menu_bg));
                     }
                     item
                 })
@@ -3559,7 +3941,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 .block(files_block)
                 .highlight_style(
                     Style::default()
-                        .bg(theme::SELECTION_BG)
+                        .bg(app.palette.selection_bg)
                         .add_modifier(Modifier::BOLD),
                 )
                 .highlight_symbol("▎ ");
@@ -3598,7 +3980,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(title);
                 f.render_widget(block.clone(), diff_area);
 
@@ -3616,8 +3998,10 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     ])
                     .split(inner);
 
-                let sep_style = Style::default().fg(theme::BORDER_INACTIVE);
-                let title_style = Style::default().fg(theme::FG).add_modifier(Modifier::BOLD);
+                let sep_style = Style::default().fg(app.palette.border_inactive);
+                let title_style = Style::default()
+                    .fg(app.palette.fg)
+                    .add_modifier(Modifier::BOLD);
 
                 let inner_w = rows[0].width as usize;
                 let sep_w = 1usize;
@@ -3665,9 +4049,9 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             );
 
                             content_lines.push(Line::from(vec![
-                                Span::styled(left, Style::default().fg(theme::FG)),
+                                Span::styled(left, Style::default().fg(app.palette.fg)),
                                 Span::styled("│", sep_style),
-                                Span::styled(right, Style::default().fg(theme::FG)),
+                                Span::styled(right, Style::default().fg(app.palette.fg)),
                             ]));
                         }
                     }
@@ -3688,16 +4072,36 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let enabled = !app.commit.busy && app.pending_job.is_none();
                 let mut x = rows[2].x;
                 for (label, action, color) in [
-                    (" < Prev ", AppAction::ConflictPrev, theme::ACCENT_TERTIARY),
-                    (" Next > ", AppAction::ConflictNext, theme::ACCENT_TERTIARY),
-                    (" Ours ", AppAction::ConflictUseOurs, theme::ACCENT_PRIMARY),
+                    (
+                        " < Prev ",
+                        AppAction::ConflictPrev,
+                        app.palette.accent_tertiary,
+                    ),
+                    (
+                        " Next > ",
+                        AppAction::ConflictNext,
+                        app.palette.accent_tertiary,
+                    ),
+                    (
+                        " Ours ",
+                        AppAction::ConflictUseOurs,
+                        app.palette.accent_primary,
+                    ),
                     (
                         " Theirs ",
                         AppAction::ConflictUseTheirs,
-                        theme::ACCENT_SECONDARY,
+                        app.palette.accent_secondary,
                     ),
-                    (" Both ", AppAction::ConflictUseBoth, theme::ACCENT_TERTIARY),
-                    (" Mark Resolved ", AppAction::MarkResolved, theme::EXE_COLOR),
+                    (
+                        " Both ",
+                        AppAction::ConflictUseBoth,
+                        app.palette.accent_tertiary,
+                    ),
+                    (
+                        " Mark Resolved ",
+                        AppAction::MarkResolved,
+                        app.palette.exe_color,
+                    ),
                 ] {
                     let w = label.len() as u16;
                     if x + w > rows[2].x + rows[2].width {
@@ -3706,9 +4110,13 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     let bg = if enabled {
                         color
                     } else {
-                        theme::BORDER_INACTIVE
+                        app.palette.border_inactive
                     };
-                    let fg = if enabled { theme::BTN_FG } else { theme::FG };
+                    let fg = if enabled {
+                        app.palette.btn_fg
+                    } else {
+                        app.palette.fg
+                    };
                     let style = Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD);
                     let rect = Rect::new(x, rows[2].y, w, 1);
                     f.render_widget(Paragraph::new(label).style(style), rect);
@@ -3722,7 +4130,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     let msg = "No conflicts";
                     let w = msg.len().min(rows[2].width as usize) as u16;
                     f.render_widget(
-                        Paragraph::new(msg).style(Style::default().fg(theme::BORDER_INACTIVE)),
+                        Paragraph::new(msg).style(Style::default().fg(app.palette.border_inactive)),
                         Rect::new(rows[2].x, rows[2].y, w, 1),
                     );
                 }
@@ -3734,7 +4142,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let diff_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(format!(" Diff ({}) ", mode_label));
 
                 let diff_lines: Vec<Line> = if app.git.repo_root.is_none() {
@@ -3762,7 +4170,9 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 if t.starts_with("@@") {
                                     out.push(Line::from(vec![Span::styled(
                                         t.to_string(),
-                                        Style::default().fg(theme::BTN_FG).bg(theme::DIFF_HUNK_BG),
+                                        Style::default()
+                                            .fg(app.palette.btn_fg)
+                                            .bg(app.palette.diff_hunk_bg),
                                     )]));
                                     continue;
                                 }
@@ -3770,7 +4180,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 if t.starts_with("diff --git") {
                                     out.push(Line::from(vec![Span::styled(
                                         t.to_string(),
-                                        Style::default().fg(theme::ACCENT_PRIMARY),
+                                        Style::default().fg(app.palette.accent_primary),
                                     )]));
                                     continue;
                                 }
@@ -3782,7 +4192,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 {
                                     out.push(Line::from(vec![Span::styled(
                                         t.to_string(),
-                                        Style::default().fg(theme::BORDER_INACTIVE),
+                                        Style::default().fg(app.palette.border_inactive),
                                     )]));
                                     continue;
                                 }
@@ -3790,10 +4200,10 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 let (prefix, code) =
                                     t.split_at(t.chars().next().map(|c| c.len_utf8()).unwrap_or(0));
                                 let (bg, is_code) = match prefix {
-                                    "+" if !t.starts_with("+++") => (theme::DIFF_ADD_BG, true),
-                                    "-" if !t.starts_with("---") => (theme::DIFF_DEL_BG, true),
-                                    " " => (theme::BG, true),
-                                    _ => (theme::BG, false),
+                                    "+" if !t.starts_with("+++") => (app.palette.diff_add_bg, true),
+                                    "-" if !t.starts_with("---") => (app.palette.diff_del_bg, true),
+                                    " " => (app.palette.bg, true),
+                                    _ => (app.palette.bg, false),
                                 };
 
                                 if is_code {
@@ -3801,19 +4211,19 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                         out.push(hl.highlight_diff_code_with_prefix(
                                             prefix,
                                             code,
-                                            Style::default().fg(theme::FG),
+                                            Style::default().fg(app.palette.fg),
                                             bg,
                                         ));
                                     } else {
                                         out.push(Line::from(vec![Span::styled(
                                             t.to_string(),
-                                            Style::default().fg(theme::FG).bg(bg),
+                                            Style::default().fg(app.palette.fg).bg(bg),
                                         )]));
                                     }
                                 } else {
                                     out.push(Line::from(vec![Span::styled(
                                         t.to_string(),
-                                        Style::default().fg(theme::FG).bg(bg),
+                                        Style::default().fg(app.palette.fg).bg(bg),
                                     )]));
                                 }
                             }
@@ -3826,9 +4236,10 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             let right_w = inner_w.saturating_sub(sep_w).saturating_sub(left_w);
 
                             let mut out = Vec::new();
-                            let title_style =
-                                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD);
-                            let sep_style = Style::default().fg(theme::BORDER_INACTIVE);
+                            let title_style = Style::default()
+                                .fg(app.palette.fg)
+                                .add_modifier(Modifier::BOLD);
+                            let sep_style = Style::default().fg(app.palette.border_inactive);
 
                             let left_title = pad_to_width(" Old ".to_string(), left_w);
                             let right_title = pad_to_width(" New ".to_string(), right_w);
@@ -3844,12 +4255,12 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                     GitDiffRow::Meta(t) => {
                                         let style = if t.starts_with("@@") {
                                             Style::default()
-                                                .fg(theme::ACCENT_TERTIARY)
-                                                .bg(theme::DIFF_HUNK_BG)
+                                                .fg(app.palette.accent_tertiary)
+                                                .bg(app.palette.diff_hunk_bg)
                                         } else if t.starts_with("diff --git") {
-                                            Style::default().fg(theme::ACCENT_PRIMARY)
+                                            Style::default().fg(app.palette.accent_primary)
                                         } else {
-                                            Style::default().fg(theme::BORDER_INACTIVE)
+                                            Style::default().fg(app.palette.border_inactive)
                                         };
                                         out.push(Line::from(vec![Span::styled(t, style)]));
                                     }
@@ -3867,31 +4278,31 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                                         let old_style = match old.kind {
                                             GitDiffCellKind::Delete => Style::default()
-                                                .fg(theme::FG)
-                                                .bg(theme::DIFF_DEL_BG),
-                                            GitDiffCellKind::Context => {
-                                                Style::default().fg(theme::FG).bg(theme::BG)
-                                            }
-                                            GitDiffCellKind::Add => {
-                                                Style::default().fg(theme::FG).bg(theme::BG)
-                                            }
+                                                .fg(app.palette.fg)
+                                                .bg(app.palette.diff_del_bg),
+                                            GitDiffCellKind::Context => Style::default()
+                                                .fg(app.palette.fg)
+                                                .bg(app.palette.bg),
+                                            GitDiffCellKind::Add => Style::default()
+                                                .fg(app.palette.fg)
+                                                .bg(app.palette.bg),
                                             GitDiffCellKind::Empty => Style::default()
-                                                .fg(theme::BORDER_INACTIVE)
-                                                .bg(theme::BG),
+                                                .fg(app.palette.border_inactive)
+                                                .bg(app.palette.bg),
                                         };
                                         let new_style = match new.kind {
                                             GitDiffCellKind::Add => Style::default()
-                                                .fg(theme::FG)
-                                                .bg(theme::DIFF_ADD_BG),
-                                            GitDiffCellKind::Context => {
-                                                Style::default().fg(theme::FG).bg(theme::BG)
-                                            }
-                                            GitDiffCellKind::Delete => {
-                                                Style::default().fg(theme::FG).bg(theme::BG)
-                                            }
+                                                .fg(app.palette.fg)
+                                                .bg(app.palette.diff_add_bg),
+                                            GitDiffCellKind::Context => Style::default()
+                                                .fg(app.palette.fg)
+                                                .bg(app.palette.bg),
+                                            GitDiffCellKind::Delete => Style::default()
+                                                .fg(app.palette.fg)
+                                                .bg(app.palette.bg),
                                             GitDiffCellKind::Empty => Style::default()
-                                                .fg(theme::BORDER_INACTIVE)
-                                                .bg(theme::BG),
+                                                .fg(app.palette.border_inactive)
+                                                .bg(app.palette.bg),
                                         };
 
                                         out.push(Line::from(vec![
@@ -4012,11 +4423,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let active = app.log_ui.subtab == subtab;
                 let style = if active {
                     Style::default()
-                        .bg(theme::ACCENT_PRIMARY)
-                        .fg(theme::BTN_FG)
+                        .bg(app.palette.accent_primary)
+                        .fg(app.palette.btn_fg)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().bg(theme::BG).fg(theme::FG)
+                    Style::default().bg(app.palette.bg).fg(app.palette.fg)
                 };
                 let rect = Rect::new(x, subtab_area.y, w, 1);
                 f.render_widget(Paragraph::new(label).style(style), rect);
@@ -4037,7 +4448,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let list_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(format!("{}({}) ", title, items_len));
 
                 let list_items: Vec<ListItem> = match app.log_ui.subtab {
@@ -4075,7 +4486,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     .block(list_block)
                     .highlight_style(
                         Style::default()
-                            .bg(theme::SELECTION_BG)
+                            .bg(app.palette.selection_bg)
                             .add_modifier(Modifier::BOLD),
                     )
                     .highlight_symbol("▎ ");
@@ -4133,7 +4544,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     let file_block = Block::default()
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
-                        .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                        .border_style(Style::default().fg(app.palette.border_inactive))
                         .title(format!(" Files ({}) ", app.log_ui.files.len()));
 
                     let file_items: Vec<ListItem> = app
@@ -4154,7 +4565,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                         .block(file_block)
                         .highlight_style(
                             Style::default()
-                                .bg(theme::SELECTION_BG)
+                                .bg(app.palette.selection_bg)
                                 .add_modifier(Modifier::BOLD),
                         )
                         .highlight_symbol("▎ ");
@@ -4204,7 +4615,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let diff_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(diff_title);
 
                 let diff_lines: Vec<Line> = match app.log_ui.diff_mode {
@@ -4227,7 +4638,9 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             if t.starts_with("@@") {
                                 out.push(Line::from(vec![Span::styled(
                                     t.to_string(),
-                                    Style::default().fg(theme::BTN_FG).bg(theme::DIFF_HUNK_BG),
+                                    Style::default()
+                                        .fg(app.palette.btn_fg)
+                                        .bg(app.palette.diff_hunk_bg),
                                 )]));
                                 continue;
                             }
@@ -4235,7 +4648,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             if t.starts_with("diff --git") {
                                 out.push(Line::from(vec![Span::styled(
                                     t.to_string(),
-                                    Style::default().fg(theme::ACCENT_PRIMARY),
+                                    Style::default().fg(app.palette.accent_primary),
                                 )]));
                                 continue;
                             }
@@ -4247,7 +4660,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             {
                                 out.push(Line::from(vec![Span::styled(
                                     t.to_string(),
-                                    Style::default().fg(theme::BORDER_INACTIVE),
+                                    Style::default().fg(app.palette.border_inactive),
                                 )]));
                                 continue;
                             }
@@ -4255,10 +4668,10 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             let (prefix, code) =
                                 t.split_at(t.chars().next().map(|c| c.len_utf8()).unwrap_or(0));
                             let (bg, is_code) = match prefix {
-                                "+" if !t.starts_with("+++") => (theme::DIFF_ADD_BG, true),
-                                "-" if !t.starts_with("---") => (theme::DIFF_DEL_BG, true),
-                                " " => (theme::BG, true),
-                                _ => (theme::BG, false),
+                                "+" if !t.starts_with("+++") => (app.palette.diff_add_bg, true),
+                                "-" if !t.starts_with("---") => (app.palette.diff_del_bg, true),
+                                " " => (app.palette.bg, true),
+                                _ => (app.palette.bg, false),
                             };
 
                             if is_code {
@@ -4266,19 +4679,19 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                     out.push(hl.highlight_diff_code_with_prefix(
                                         prefix,
                                         code,
-                                        Style::default().fg(theme::FG),
+                                        Style::default().fg(app.palette.fg),
                                         bg,
                                     ));
                                 } else {
                                     out.push(Line::from(vec![Span::styled(
                                         t.to_string(),
-                                        Style::default().fg(theme::FG).bg(bg),
+                                        Style::default().fg(app.palette.fg).bg(bg),
                                     )]));
                                 }
                             } else {
                                 out.push(Line::from(vec![Span::styled(
                                     t.to_string(),
-                                    Style::default().fg(theme::FG).bg(bg),
+                                    Style::default().fg(app.palette.fg).bg(bg),
                                 )]));
                             }
                         }
@@ -4293,7 +4706,9 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             horizontal: 1,
                         });
                         let total_w = inner.width as usize;
-                        let sep_style = Style::default().fg(theme::BORDER_INACTIVE).bg(theme::BG);
+                        let sep_style = Style::default()
+                            .fg(app.palette.border_inactive)
+                            .bg(app.palette.bg);
                         let left_w = total_w.saturating_sub(1) / 2;
                         let right_w = total_w.saturating_sub(1) - left_w;
 
@@ -4301,15 +4716,21 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             match r {
                                 GitDiffRow::Meta(t) => {
                                     let style = if t.starts_with("@@") {
-                                        Style::default().fg(theme::BTN_FG).bg(theme::DIFF_HUNK_BG)
+                                        Style::default()
+                                            .fg(app.palette.btn_fg)
+                                            .bg(app.palette.diff_hunk_bg)
                                     } else if t.starts_with("+") {
-                                        Style::default().fg(theme::FG).bg(theme::DIFF_ADD_BG)
+                                        Style::default()
+                                            .fg(app.palette.fg)
+                                            .bg(app.palette.diff_add_bg)
                                     } else if t.starts_with("-") {
-                                        Style::default().fg(theme::FG).bg(theme::DIFF_DEL_BG)
+                                        Style::default()
+                                            .fg(app.palette.fg)
+                                            .bg(app.palette.diff_del_bg)
                                     } else if t.starts_with("diff --git") {
-                                        Style::default().fg(theme::ACCENT_PRIMARY)
+                                        Style::default().fg(app.palette.accent_primary)
                                     } else {
-                                        Style::default().fg(theme::BORDER_INACTIVE)
+                                        Style::default().fg(app.palette.border_inactive)
                                     };
                                     out.push(Line::from(vec![Span::styled(t, style)]));
                                 }
@@ -4326,32 +4747,32 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                     );
 
                                     let old_style = match old.kind {
-                                        GitDiffCellKind::Delete => {
-                                            Style::default().fg(theme::FG).bg(theme::DIFF_DEL_BG)
-                                        }
+                                        GitDiffCellKind::Delete => Style::default()
+                                            .fg(app.palette.fg)
+                                            .bg(app.palette.diff_del_bg),
                                         GitDiffCellKind::Context => {
-                                            Style::default().fg(theme::FG).bg(theme::BG)
+                                            Style::default().fg(app.palette.fg).bg(app.palette.bg)
                                         }
                                         GitDiffCellKind::Add => {
-                                            Style::default().fg(theme::FG).bg(theme::BG)
+                                            Style::default().fg(app.palette.fg).bg(app.palette.bg)
                                         }
                                         GitDiffCellKind::Empty => Style::default()
-                                            .fg(theme::BORDER_INACTIVE)
-                                            .bg(theme::BG),
+                                            .fg(app.palette.border_inactive)
+                                            .bg(app.palette.bg),
                                     };
                                     let new_style = match new.kind {
-                                        GitDiffCellKind::Add => {
-                                            Style::default().fg(theme::FG).bg(theme::DIFF_ADD_BG)
-                                        }
+                                        GitDiffCellKind::Add => Style::default()
+                                            .fg(app.palette.fg)
+                                            .bg(app.palette.diff_add_bg),
                                         GitDiffCellKind::Context => {
-                                            Style::default().fg(theme::FG).bg(theme::BG)
+                                            Style::default().fg(app.palette.fg).bg(app.palette.bg)
                                         }
                                         GitDiffCellKind::Delete => {
-                                            Style::default().fg(theme::FG).bg(theme::BG)
+                                            Style::default().fg(app.palette.fg).bg(app.palette.bg)
                                         }
                                         GitDiffCellKind::Empty => Style::default()
-                                            .fg(theme::BORDER_INACTIVE)
-                                            .bg(theme::BG),
+                                            .fg(app.palette.border_inactive)
+                                            .bg(app.palette.bg),
                                     };
 
                                     out.push(Line::from(vec![
@@ -4420,7 +4841,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     });
                     let s = format!("Status: {}", msg);
                     f.render_widget(
-                        Paragraph::new(s).style(Style::default().fg(theme::BTN_BG)),
+                        Paragraph::new(s).style(Style::default().fg(app.palette.btn_bg)),
                         Rect::new(
                             diff_area.x + 2,
                             diff_area.y + 1,
@@ -4438,7 +4859,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let commit_block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+                .border_style(Style::default().fg(app.palette.accent_primary))
                 .title(" Commit ");
             f.render_widget(commit_block.clone(), commit_area);
 
@@ -4460,14 +4881,17 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             let model =
                 env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "openai/gpt-5.2".to_string());
-            let header = Paragraph::new(format!("Message    AI: {}", model))
-                .style(Style::default().fg(theme::FG).add_modifier(Modifier::BOLD));
+            let header = Paragraph::new(format!("Message    AI: {}", model)).style(
+                Style::default()
+                    .fg(app.palette.fg)
+                    .add_modifier(Modifier::BOLD),
+            );
             f.render_widget(header, rows[0]);
 
             let input_border = if app.commit.focus == CommitFocus::Message {
-                theme::ACCENT_PRIMARY
+                app.palette.accent_primary
             } else {
-                theme::BORDER_INACTIVE
+                app.palette.border_inactive
             };
             let input_block = Block::default()
                 .borders(Borders::ALL)
@@ -4485,7 +4909,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let input_lines: Vec<Line> = if app.commit.message.is_empty() {
                 vec![Line::from(Span::styled(
                     "Type commit message...",
-                    Style::default().fg(theme::BORDER_INACTIVE),
+                    Style::default().fg(app.palette.border_inactive),
                 ))]
             } else {
                 app.commit.message.lines().map(Line::raw).collect()
@@ -4521,7 +4945,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 ""
             });
             f.render_widget(
-                Paragraph::new(status_text).style(Style::default().fg(theme::FG)),
+                Paragraph::new(status_text).style(Style::default().fg(app.palette.fg)),
                 rows[2],
             );
 
@@ -4530,19 +4954,19 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 (
                     " AI Generate ",
                     AppAction::GenerateCommitMessage,
-                    theme::ACCENT_TERTIARY,
+                    app.palette.accent_tertiary,
                     !app.commit.busy,
                 ),
                 (
                     " Commit ",
                     AppAction::GitFooter(GitFooterAction::Commit),
-                    theme::ACCENT_SECONDARY,
+                    app.palette.accent_secondary,
                     !app.commit.busy,
                 ),
                 (
                     " Close ",
                     AppAction::ToggleCommitDrawer,
-                    theme::BTN_BG,
+                    app.palette.btn_bg,
                     true,
                 ),
             ] {
@@ -4550,9 +4974,13 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let bg = if enabled {
                     color
                 } else {
-                    theme::BORDER_INACTIVE
+                    app.palette.border_inactive
                 };
-                let fg = if enabled { theme::BTN_FG } else { theme::FG };
+                let fg = if enabled {
+                    app.palette.btn_fg
+                } else {
+                    app.palette.fg
+                };
                 let style = Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD);
                 let rect = Rect::new(x, rows[3].y, w, 1);
                 f.render_widget(Paragraph::new(label).style(style), rect);
@@ -4564,20 +4992,23 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             f.render_widget(
                 Paragraph::new("Ctrl+G AI  Ctrl+Enter commit  Esc close")
-                    .style(Style::default().fg(theme::BORDER_INACTIVE)),
+                    .style(Style::default().fg(app.palette.border_inactive)),
                 rows[4],
             );
         } else {
             let sep = Block::default()
                 .borders(Borders::TOP)
-                .border_style(Style::default().fg(theme::BORDER_INACTIVE));
+                .border_style(Style::default().fg(app.palette.border_inactive));
             f.render_widget(sep, commit_area);
 
             let label = " Commit ▸ ";
             let w = label.len().min(commit_area.width as usize) as u16;
             f.render_widget(
-                Paragraph::new(label)
-                    .style(Style::default().fg(theme::FG).add_modifier(Modifier::BOLD)),
+                Paragraph::new(label).style(
+                    Style::default()
+                        .fg(app.palette.fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Rect::new(commit_area.x + 2, commit_area.y, w, 1),
             );
             zones.push(ClickZone {
@@ -4589,7 +5020,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
     let footer_block = Block::default()
         .borders(Borders::TOP)
-        .border_style(Style::default().fg(theme::BORDER_INACTIVE));
+        .border_style(Style::default().fg(app.palette.border_inactive));
     f.render_widget(footer_block, footer_area);
 
     let btn_y = footer_area.y + 1;
@@ -4599,31 +5030,44 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
     match app.current_tab {
         Tab::Explorer => {
             buttons.push((
+                " Menu (^P) ".to_string(),
+                AppAction::OpenCommandPalette,
+                app.palette.accent_primary,
+                true,
+            ));
+            buttons.push((
                 " ⬅ Back (h) ".to_string(),
                 AppAction::GoParent,
-                theme::ACCENT_PRIMARY,
+                app.palette.accent_primary,
                 true,
             ));
             buttons.push((
                 " ⏎ Enter (l) ".to_string(),
                 AppAction::EnterDir,
-                theme::ACCENT_SECONDARY,
+                app.palette.accent_secondary,
                 true,
             ));
             buttons.push((
                 " 👁 Hidden (.) ".to_string(),
                 AppAction::ToggleHidden,
-                theme::ACCENT_TERTIARY,
+                app.palette.accent_tertiary,
                 true,
             ));
             buttons.push((
                 " ✖ Quit (q) ".to_string(),
                 AppAction::Quit,
-                theme::BTN_BG,
+                app.palette.btn_bg,
                 true,
             ));
         }
         Tab::Git => {
+            buttons.push((
+                " Menu (^P) ".to_string(),
+                AppAction::OpenCommandPalette,
+                app.palette.accent_primary,
+                true,
+            ));
+
             let enabled = app.pending_job.is_none() && !app.commit.busy && !app.branch_ui.open;
             let in_conflict_view = app.git.selected_entry().is_some_and(|e| e.is_conflict);
 
@@ -4631,92 +5075,92 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 buttons.push((
                     " < Prev (p) ".to_string(),
                     AppAction::ConflictPrev,
-                    theme::ACCENT_TERTIARY,
+                    app.palette.accent_tertiary,
                     enabled,
                 ));
                 buttons.push((
                     " Next (n) > ".to_string(),
                     AppAction::ConflictNext,
-                    theme::ACCENT_TERTIARY,
+                    app.palette.accent_tertiary,
                     enabled,
                 ));
                 buttons.push((
                     " Ours (o) ".to_string(),
                     AppAction::ConflictUseOurs,
-                    theme::ACCENT_PRIMARY,
+                    app.palette.accent_primary,
                     enabled,
                 ));
                 buttons.push((
                     " Theirs (t) ".to_string(),
                     AppAction::ConflictUseTheirs,
-                    theme::ACCENT_SECONDARY,
+                    app.palette.accent_secondary,
                     enabled,
                 ));
                 buttons.push((
                     " Both (b) ".to_string(),
                     AppAction::ConflictUseBoth,
-                    theme::ACCENT_TERTIARY,
+                    app.palette.accent_tertiary,
                     enabled,
                 ));
                 buttons.push((
                     " Mark (a) ".to_string(),
                     AppAction::MarkResolved,
-                    theme::EXE_COLOR,
+                    app.palette.exe_color,
                     enabled,
                 ));
                 buttons.push((
                     " ✎ Commit… ".to_string(),
                     AppAction::ToggleCommitDrawer,
-                    theme::ACCENT_PRIMARY,
+                    app.palette.accent_primary,
                     true,
                 ));
             } else {
                 buttons.push((
                     " ␠ Toggle ".to_string(),
                     AppAction::ToggleGitStage,
-                    theme::ACCENT_PRIMARY,
+                    app.palette.accent_primary,
                     enabled,
                 ));
                 buttons.push((
                     " + Stage ".to_string(),
                     AppAction::GitFooter(GitFooterAction::Stage),
-                    theme::ACCENT_SECONDARY,
+                    app.palette.accent_secondary,
                     enabled,
                 ));
                 buttons.push((
                     " - Unstage ".to_string(),
                     AppAction::GitFooter(GitFooterAction::Unstage),
-                    theme::ACCENT_TERTIARY,
+                    app.palette.accent_tertiary,
                     enabled,
                 ));
                 buttons.push((
                     " ↩ Discard ".to_string(),
                     AppAction::GitFooter(GitFooterAction::Discard),
-                    theme::BTN_BG,
+                    app.palette.btn_bg,
                     enabled,
                 ));
                 buttons.push((
                     " + All (A) ".to_string(),
                     AppAction::GitStageAllVisible,
-                    theme::ACCENT_SECONDARY,
+                    app.palette.accent_secondary,
                     enabled,
                 ));
                 buttons.push((
                     " - All (U) ".to_string(),
                     AppAction::GitUnstageAllVisible,
-                    theme::ACCENT_TERTIARY,
+                    app.palette.accent_tertiary,
                     enabled,
                 ));
                 buttons.push((
                     " Branch (B) ".to_string(),
                     AppAction::OpenBranchPicker,
-                    theme::ACCENT_TERTIARY,
+                    app.palette.accent_tertiary,
                     enabled,
                 ));
                 buttons.push((
                     " ✎ Commit… ".to_string(),
                     AppAction::ToggleCommitDrawer,
-                    theme::ACCENT_PRIMARY,
+                    app.palette.accent_primary,
                     true,
                 ));
             }
@@ -4724,75 +5168,81 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             buttons.push((
                 " ✖ Quit (q) ".to_string(),
                 AppAction::Quit,
-                theme::BTN_BG,
+                app.palette.btn_bg,
                 true,
             ));
         }
         Tab::Log => {
             buttons.push((
+                " Menu (^P) ".to_string(),
+                AppAction::OpenCommandPalette,
+                app.palette.accent_primary,
+                true,
+            ));
+            buttons.push((
                 " History (h) ".to_string(),
                 AppAction::LogSwitch(LogSubTab::History),
-                theme::ACCENT_TERTIARY,
+                app.palette.accent_tertiary,
                 true,
             ));
             buttons.push((
                 " Reflog (r) ".to_string(),
                 AppAction::LogSwitch(LogSubTab::Reflog),
-                theme::ACCENT_TERTIARY,
+                app.palette.accent_tertiary,
                 true,
             ));
             buttons.push((
                 " Cmd (c) ".to_string(),
                 AppAction::LogSwitch(LogSubTab::Commands),
-                theme::ACCENT_TERTIARY,
+                app.palette.accent_tertiary,
                 true,
             ));
             buttons.push((
                 " Diff (d) ".to_string(),
                 AppAction::LogDetail(LogDetailMode::Diff),
-                theme::ACCENT_PRIMARY,
+                app.palette.accent_primary,
                 app.log_ui.subtab != LogSubTab::Commands,
             ));
             buttons.push((
                 " Changed (f) ".to_string(),
                 AppAction::LogDetail(LogDetailMode::Files),
-                theme::ACCENT_PRIMARY,
+                app.palette.accent_primary,
                 app.log_ui.subtab != LogSubTab::Commands,
             ));
             buttons.push((
                 " Inspect (i) ".to_string(),
                 AppAction::LogInspect,
-                theme::ACCENT_SECONDARY,
+                app.palette.accent_secondary,
                 true,
             ));
             buttons.push((
                 " Zoom (z) ".to_string(),
                 AppAction::LogToggleZoom,
-                theme::ACCENT_TERTIARY,
+                app.palette.accent_tertiary,
                 true,
             ));
             buttons.push((
                 " < ([) ".to_string(),
                 AppAction::LogAdjustLeft(-2),
-                theme::BTN_BG,
+                app.palette.btn_bg,
                 app.log_ui.zoom == LogZoom::None,
             ));
             buttons.push((
                 " > (]) ".to_string(),
                 AppAction::LogAdjustLeft(2),
-                theme::BTN_BG,
+                app.palette.btn_bg,
                 app.log_ui.zoom == LogZoom::None,
             ));
             buttons.push((
                 " Clear Cmd (x) ".to_string(),
                 AppAction::ClearGitLog,
-                theme::BTN_BG,
+                app.palette.btn_bg,
                 app.log_ui.subtab == LogSubTab::Commands,
             ));
             buttons.push((
                 " ✖ Quit (q) ".to_string(),
                 AppAction::Quit,
-                theme::BTN_BG,
+                app.palette.btn_bg,
                 true,
             ));
         }
@@ -4820,9 +5270,13 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         let bg = if enabled {
             color
         } else {
-            theme::BORDER_INACTIVE
+            app.palette.border_inactive
         };
-        let fg = if enabled { theme::BTN_FG } else { theme::FG };
+        let fg = if enabled {
+            app.palette.btn_fg
+        } else {
+            app.palette.fg
+        };
         let btn_style = Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD);
 
         f.render_widget(
@@ -4845,7 +5299,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         let available = footer_area.width.saturating_sub(used).saturating_sub(2);
         if available > 0 {
             f.render_widget(
-                Paragraph::new(msg.as_str()).style(Style::default().fg(theme::FG)),
+                Paragraph::new(msg.as_str()).style(Style::default().fg(app.palette.fg)),
                 Rect::new(btn_x, btn_y, available, 1),
             );
         }
@@ -4857,7 +5311,18 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         if available > 0 {
             let w = hint.len().min(available as usize) as u16;
             f.render_widget(
-                Paragraph::new(hint).style(Style::default().fg(theme::BORDER_INACTIVE)),
+                Paragraph::new(hint).style(Style::default().fg(app.palette.border_inactive)),
+                Rect::new(btn_x, btn_y, w, 1),
+            );
+        }
+    } else {
+        let hint = "Ctrl+P menu  T theme";
+        let used = btn_x.saturating_sub(footer_area.x);
+        let available = footer_area.width.saturating_sub(used).saturating_sub(2);
+        if available > 0 {
+            let w = hint.len().min(available as usize) as u16;
+            f.render_widget(
+                Paragraph::new(hint).style(Style::default().fg(app.palette.border_inactive)),
                 Rect::new(btn_x, btn_y, w, 1),
             );
         }
@@ -4880,7 +5345,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+            .border_style(Style::default().fg(app.palette.accent_primary))
             .title(" Checkout Branch ");
         f.render_widget(block.clone(), modal);
 
@@ -4899,7 +5364,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             .split(inner);
 
         let query = Paragraph::new(format!("Filter: {}", app.branch_ui.query))
-            .style(Style::default().fg(theme::FG));
+            .style(Style::default().fg(app.palette.fg));
         f.render_widget(query, rows[0]);
 
         let list_items: Vec<ListItem> = app
@@ -4928,13 +5393,13 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(" Branches "),
             )
             .highlight_style(
                 Style::default()
-                    .bg(theme::ACCENT_PRIMARY)
-                    .fg(theme::BTN_FG)
+                    .bg(app.palette.accent_primary)
+                    .fg(app.palette.btn_fg)
                     .add_modifier(Modifier::BOLD),
             );
         f.render_stateful_widget(list, rows[1], &mut app.branch_ui.list_state);
@@ -4958,15 +5423,15 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             (
                 " Checkout ",
                 AppAction::BranchCheckout,
-                theme::ACCENT_SECONDARY,
+                app.palette.accent_secondary,
             ),
-            (" Close ", AppAction::CloseBranchPicker, theme::BTN_BG),
+            (" Close ", AppAction::CloseBranchPicker, app.palette.btn_bg),
         ] {
             let w = label.len() as u16;
             let rect = Rect::new(x, rows[2].y, w, 1);
             let style = Style::default()
                 .bg(color)
-                .fg(theme::BTN_FG)
+                .fg(app.palette.btn_fg)
                 .add_modifier(Modifier::BOLD);
             f.render_widget(Paragraph::new(label).style(style), rect);
             zones.push(ClickZone { rect, action });
@@ -4975,7 +5440,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
         if let Some(msg) = app.branch_ui.status.as_deref() {
             f.render_widget(
-                Paragraph::new(msg).style(Style::default().fg(theme::BTN_BG)),
+                Paragraph::new(msg).style(Style::default().fg(app.palette.btn_bg)),
                 Rect::new(
                     rows[2].x + 30,
                     rows[2].y,
@@ -4997,7 +5462,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::BTN_BG))
+                .border_style(Style::default().fg(app.palette.btn_bg))
                 .title(" Uncommitted Changes ");
             f.render_widget(block.clone(), confirm);
 
@@ -5012,7 +5477,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 Line::raw(format!("Checkout `{}` anyway?", pending)),
             ];
             f.render_widget(
-                Paragraph::new(text).style(Style::default().fg(theme::FG)),
+                Paragraph::new(text).style(Style::default().fg(app.palette.fg)),
                 Rect::new(
                     inner.x,
                     inner.y,
@@ -5027,15 +5492,19 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 (
                     " Checkout ",
                     AppAction::ConfirmBranchCheckout,
-                    theme::ACCENT_SECONDARY,
+                    app.palette.accent_secondary,
                 ),
-                (" Cancel ", AppAction::CancelBranchCheckout, theme::BTN_BG),
+                (
+                    " Cancel ",
+                    AppAction::CancelBranchCheckout,
+                    app.palette.btn_bg,
+                ),
             ] {
                 let w = label.len() as u16;
                 let rect = Rect::new(bx, by, w, 1);
                 let style = Style::default()
                     .bg(color)
-                    .fg(theme::BTN_FG)
+                    .fg(app.palette.btn_fg)
                     .add_modifier(Modifier::BOLD);
                 f.render_widget(Paragraph::new(label).style(style), rect);
                 zones.push(ClickZone { rect, action });
@@ -5067,8 +5536,8 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::ACCENT_SECONDARY))
-                .bg(theme::MENU_BG);
+                .border_style(Style::default().fg(app.palette.accent_secondary))
+                .bg(app.palette.menu_bg);
 
             f.render_widget(block.clone(), menu_area);
 
@@ -5084,11 +5553,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let is_selected = i == menu.selected;
                 let style = if is_selected {
                     Style::default()
-                        .bg(theme::SELECTION_BG)
-                        .fg(theme::FG)
+                        .bg(app.palette.selection_bg)
+                        .fg(app.palette.fg)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme::FG)
+                    Style::default().fg(app.palette.fg)
                 };
 
                 f.render_widget(Paragraph::new(label.as_str()).style(style), item_area);
@@ -5098,6 +5567,126 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     action: AppAction::ContextMenuAction(i),
                 });
             }
+        }
+    }
+
+    if app.discard_confirm.is_none()
+        && !app.branch_ui.open
+        && app.context_menu.is_none()
+        && !app.log_ui.inspect.open
+        && app.operation_popup.is_none()
+    {
+        if app.command_palette.open {
+            let w = area.width.min(56).saturating_sub(2).max(32);
+            let desired_h = COMMAND_PALETTE_ITEMS.len() as u16 + 6;
+            let h = desired_h.min(area.height.saturating_sub(2)).max(10);
+            let x = area.x + (area.width.saturating_sub(w)) / 2;
+            let y = area.y + (area.height.saturating_sub(h)) / 2;
+            let modal = Rect::new(x, y, w, h);
+
+            f.render_widget(Clear, modal);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(app.palette.accent_primary))
+                .title(" Menu (Ctrl+P) ");
+            f.render_widget(block.clone(), modal);
+
+            let inner = modal.inner(Margin {
+                vertical: 1,
+                horizontal: 2,
+            });
+
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(1)])
+                .split(inner);
+
+            let list_items: Vec<ListItem> = COMMAND_PALETTE_ITEMS
+                .iter()
+                .map(|(_, label)| ListItem::new(format!("  {}", label)))
+                .collect();
+
+            let list = List::new(list_items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(app.palette.border_inactive))
+                        .title(" Commands "),
+                )
+                .highlight_style(
+                    Style::default()
+                        .bg(app.palette.accent_primary)
+                        .fg(app.palette.btn_fg)
+                        .add_modifier(Modifier::BOLD),
+                );
+            f.render_stateful_widget(list, rows[0], &mut app.command_palette.list_state);
+
+            let hint = "j/k move  Enter run  Esc close";
+            f.render_widget(
+                Paragraph::new(hint).style(Style::default().fg(app.palette.border_inactive)),
+                rows[1],
+            );
+        }
+
+        if app.theme_picker.open {
+            let w = 35u16.min(area.width.saturating_sub(2)).max(30);
+            let h = 11u16.min(area.height.saturating_sub(2)).max(9);
+            let x = area.x + (area.width.saturating_sub(w)) / 2;
+            let y = area.y + (area.height.saturating_sub(h)) / 2;
+            let modal = Rect::new(x, y, w, h);
+
+            f.render_widget(Clear, modal);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(app.palette.accent_primary))
+                .title(" Select Theme ");
+            f.render_widget(block.clone(), modal);
+
+            let inner = modal.inner(Margin {
+                vertical: 1,
+                horizontal: 2,
+            });
+
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(1)])
+                .split(inner);
+
+            let list_items: Vec<ListItem> = THEME_ORDER
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    let current = if *t == app.theme { "*" } else { " " };
+                    ListItem::new(format!("{} {} {}", current, i + 1, t.label()))
+                })
+                .collect();
+
+            let list = List::new(list_items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(app.palette.border_inactive))
+                        .title(" Themes "),
+                )
+                .highlight_style(
+                    Style::default()
+                        .bg(app.palette.accent_primary)
+                        .fg(app.palette.btn_fg)
+                        .add_modifier(Modifier::BOLD),
+                );
+            f.render_stateful_widget(list, rows[0], &mut app.theme_picker.list_state);
+
+            let hint = "j/k move  Enter apply  1-5 quick  Esc";
+            f.render_widget(
+                Paragraph::new(hint).style(Style::default().fg(app.palette.border_inactive)),
+                rows[1],
+            );
         }
     }
 
@@ -5118,7 +5707,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme::ACCENT_SECONDARY))
+            .border_style(Style::default().fg(app.palette.accent_secondary))
             .title(app.log_ui.inspect.title.as_str());
         f.render_widget(block.clone(), modal);
 
@@ -5150,20 +5739,20 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             (
                 primary_label.as_str(),
                 AppAction::LogInspectCopyPrimary,
-                theme::ACCENT_PRIMARY,
+                app.palette.accent_primary,
             ),
             (
                 secondary_label.as_str(),
                 AppAction::LogInspectCopySecondary,
-                theme::ACCENT_TERTIARY,
+                app.palette.accent_tertiary,
             ),
-            (" Close ", AppAction::LogCloseInspect, theme::BTN_BG),
+            (" Close ", AppAction::LogCloseInspect, app.palette.btn_bg),
         ] {
             let bw = label.len() as u16;
             let rect = Rect::new(bx, buttons_y, bw, 1);
             let style = Style::default()
                 .bg(color)
-                .fg(theme::BTN_FG)
+                .fg(app.palette.btn_fg)
                 .add_modifier(Modifier::BOLD);
             f.render_widget(Paragraph::new(label).style(style), rect);
             zones.push(ClickZone { rect, action });
@@ -5187,9 +5776,9 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             f.render_widget(Clear, modal);
 
             let border = if popup.ok {
-                theme::ACCENT_SECONDARY
+                app.palette.accent_secondary
             } else {
-                theme::BTN_BG
+                app.palette.btn_bg
             };
             let block = Block::default()
                 .borders(Borders::ALL)
@@ -5216,8 +5805,8 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let bw = label.len() as u16;
             let rect = Rect::new(inner.x, buttons_y, bw, 1);
             let style = Style::default()
-                .bg(theme::BTN_BG)
-                .fg(theme::BTN_FG)
+                .bg(app.palette.btn_bg)
+                .fg(app.palette.btn_fg)
                 .add_modifier(Modifier::BOLD);
             f.render_widget(Paragraph::new(label).style(style), rect);
             zones.push(ClickZone {
@@ -5255,7 +5844,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme::BTN_BG))
+            .border_style(Style::default().fg(app.palette.btn_bg))
             .title(title);
         f.render_widget(block.clone(), modal);
 
@@ -5297,7 +5886,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         let text_h = inner.height.saturating_sub(2);
         f.render_widget(
             Paragraph::new(lines)
-                .style(Style::default().fg(theme::FG))
+                .style(Style::default().fg(app.palette.fg))
                 .wrap(Wrap { trim: false }),
             Rect::new(inner.x, inner.y, inner.width, text_h),
         );
@@ -5305,13 +5894,17 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         let buttons_y = inner.y + inner.height.saturating_sub(1);
         let mut bx = inner.x;
         for (label, action, color) in [
-            (" Discard ", AppAction::ConfirmDiscard, theme::BTN_BG),
-            (" Cancel ", AppAction::CancelDiscard, theme::BORDER_INACTIVE),
+            (" Discard ", AppAction::ConfirmDiscard, app.palette.btn_bg),
+            (
+                " Cancel ",
+                AppAction::CancelDiscard,
+                app.palette.border_inactive,
+            ),
         ] {
             let bw = label.len() as u16;
             let style = Style::default()
                 .bg(color)
-                .fg(theme::BTN_FG)
+                .fg(app.palette.btn_fg)
                 .add_modifier(Modifier::BOLD);
             let rect = Rect::new(bx, buttons_y, bw, 1);
             f.render_widget(Paragraph::new(label).style(style), rect);
@@ -5369,22 +5962,55 @@ fn main() -> io::Result<()> {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') => app.should_quit = true,
-                    KeyCode::Char('1') if app.operation_popup.is_none() => {
+                    KeyCode::Char('1')
+                        if app.operation_popup.is_none()
+                            && !app.theme_picker.open
+                            && !app.command_palette.open =>
+                    {
                         app.current_tab = Tab::Explorer;
                     }
-                    KeyCode::Char('2') if app.operation_popup.is_none() => {
+                    KeyCode::Char('2')
+                        if app.operation_popup.is_none()
+                            && !app.theme_picker.open
+                            && !app.command_palette.open =>
+                    {
                         app.current_tab = Tab::Git;
                         app.git.refresh(&app.current_path);
                         app.update_git_operation();
                     }
-                    KeyCode::Char('3') if app.operation_popup.is_none() => {
+                    KeyCode::Char('3')
+                        if app.operation_popup.is_none()
+                            && !app.theme_picker.open
+                            && !app.command_palette.open =>
+                    {
                         app.current_tab = Tab::Log;
                         app.refresh_log_data();
+                    }
+                    KeyCode::Char('p')
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && app.operation_popup.is_none()
+                            && app.discard_confirm.is_none()
+                            && !app.branch_ui.open
+                            && app.context_menu.is_none()
+                            && !app.log_ui.inspect.open =>
+                    {
+                        app.open_command_palette();
+                    }
+                    KeyCode::Char('T')
+                        if app.operation_popup.is_none()
+                            && app.discard_confirm.is_none()
+                            && !app.branch_ui.open
+                            && app.context_menu.is_none()
+                            && !app.log_ui.inspect.open =>
+                    {
+                        app.open_theme_picker();
                     }
                     KeyCode::Esc => {
                         app.context_menu = None;
                         app.discard_confirm = None;
                         app.operation_popup = None;
+                        app.theme_picker.open = false;
+                        app.command_palette.open = false;
                         app.log_ui.inspect.close();
                         if app.branch_ui.open {
                             if app.branch_ui.confirm_checkout.is_some() {
@@ -5398,7 +6024,29 @@ fn main() -> io::Result<()> {
                         }
                     }
                     _ => {
-                        if let Some(popup) = &mut app.operation_popup {
+                        if app.theme_picker.open {
+                            match key.code {
+                                KeyCode::Char('j') | KeyCode::Down => app.move_theme_picker(1),
+                                KeyCode::Char('k') | KeyCode::Up => app.move_theme_picker(-1),
+                                KeyCode::Enter => app.apply_theme_picker_selection(),
+                                KeyCode::Char(ch) if ('1'..='5').contains(&ch) => {
+                                    let idx =
+                                        ch.to_digit(10).unwrap_or(1).saturating_sub(1) as usize;
+                                    if idx < THEME_ORDER.len() {
+                                        app.theme_picker.list_state.select(Some(idx));
+                                        app.apply_theme_picker_selection();
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else if app.command_palette.open {
+                            match key.code {
+                                KeyCode::Char('j') | KeyCode::Down => app.move_command_palette(1),
+                                KeyCode::Char('k') | KeyCode::Up => app.move_command_palette(-1),
+                                KeyCode::Enter => app.run_command_palette_selection(),
+                                _ => {}
+                            }
+                        } else if let Some(popup) = &mut app.operation_popup {
                             match key.code {
                                 KeyCode::Esc | KeyCode::Enter => app.operation_popup = None,
                                 KeyCode::Char('j') | KeyCode::Down => {
