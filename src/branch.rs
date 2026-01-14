@@ -4,6 +4,7 @@ use ratatui::widgets::ListState;
 pub struct BranchEntry {
     pub name: String,
     pub is_current: bool,
+    pub is_remote: bool,
     pub upstream: Option<String>,
     pub track: Option<String>,
 }
@@ -59,10 +60,10 @@ impl BranchUi {
         }
     }
 
-    pub fn selected_branch_name(&self) -> Option<String> {
+    pub fn selected_branch(&self) -> Option<BranchEntry> {
         let sel = self.list_state.selected()?;
         let idx = *self.filtered.get(sel)?;
-        self.branches.get(idx).map(|b| b.name.clone())
+        self.branches.get(idx).cloned()
     }
 
     pub fn move_selection(&mut self, delta: i32) {

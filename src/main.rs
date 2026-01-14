@@ -17,6 +17,7 @@ use ratatui::{
     },
 };
 use ratatui_image::{StatefulImage, picker::Picker, protocol::StatefulProtocol};
+use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     collections::VecDeque,
@@ -34,6 +35,7 @@ mod commit;
 mod conflict;
 mod git;
 mod git_ops;
+mod highlight;
 mod openrouter;
 
 use branch::BranchUi;
@@ -43,6 +45,7 @@ use git::{
     GitDiffCellKind, GitDiffMode, GitDiffRow, GitSection, GitState, build_side_by_side_rows,
     pad_to_width, render_side_by_side_cell,
 };
+use highlight::{Highlighter, new_highlighter};
 
 mod theme {
     use ratatui::style::Color;
@@ -97,6 +100,20 @@ enum AppAction {
     ConfirmDiscard,
     CancelDiscard,
     ClearGitLog,
+    LogSwitch(LogSubTab),
+    LogDetail(LogDetailMode),
+    LogToggleZoom,
+    LogInspect,
+    LogCloseInspect,
+    LogInspectCopyPrimary,
+    LogInspectCopySecondary,
+    LogFocusDiff,
+    LogFocusFiles,
+    LogAdjustLeft(i16),
+    SelectLogItem(usize),
+    SelectLogFile(usize),
+
+    CloseOperationPopup,
     MergeContinue,
     MergeAbort,
     RebaseContinue,
@@ -158,6 +175,7 @@ enum ContextCommand {
     CopyPath,
     CopyRelPath,
     Rename,
+
     GitStage,
     GitUnstage,
     GitToggleStage,
@@ -167,6 +185,12 @@ enum ContextCommand {
     GitOpenInExplorer,
     GitCopyPath,
     GitCopyRelPath,
+    GitAddToGitignore,
+
+    LogCopySha,
+    LogCheckoutDetached,
+    LogCopySubject,
+    LogCopyCommand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,10 +219,206 @@ struct GitLogEntry {
     detail: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PersistedUiSettings {
+    #[serde(default)]
+    log_left_width: Option<u16>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GitOperation {
     Merge,
     Rebase,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LogSubTab {
+    History,
+    Reflog,
+    Commands,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LogDetailMode {
+    Diff,
+    Files,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LogPaneFocus {
+    Commits,
+    Files,
+    Diff,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LogZoom {
+    None,
+    List,
+    Diff,
+}
+
+struct InspectUi {
+    open: bool,
+    title: String,
+    body: String,
+    scroll_y: u16,
+}
+
+impl InspectUi {
+    fn new() -> Self {
+        Self {
+            open: false,
+            title: String::new(),
+            body: String::new(),
+            scroll_y: 0,
+        }
+    }
+
+    fn close(&mut self) {
+        self.open = false;
+        self.title.clear();
+        self.body.clear();
+        self.scroll_y = 0;
+    }
+}
+
+struct LogUi {
+    subtab: LogSubTab,
+    detail_mode: LogDetailMode,
+    focus: LogPaneFocus,
+    zoom: LogZoom,
+
+    diff_mode: GitDiffMode,
+
+    left_width: u16,
+
+    history: Vec<git_ops::CommitEntry>,
+    reflog: Vec<git_ops::ReflogEntry>,
+    files: Vec<git_ops::CommitFileChange>,
+    files_hash: Option<String>,
+
+    history_state: ListState,
+    reflog_state: ListState,
+    command_state: ListState,
+    files_state: ListState,
+
+    diff_lines: Vec<String>,
+    diff_scroll_y: u16,
+    diff_scroll_x: u16,
+
+    inspect: InspectUi,
+    status: Option<String>,
+}
+
+impl LogUi {
+    fn new() -> Self {
+        Self {
+            subtab: LogSubTab::History,
+            detail_mode: LogDetailMode::Diff,
+            focus: LogPaneFocus::Commits,
+            zoom: LogZoom::None,
+
+            diff_mode: GitDiffMode::Unified,
+
+            left_width: 56,
+
+            history: Vec::new(),
+            reflog: Vec::new(),
+            files: Vec::new(),
+            files_hash: None,
+
+            history_state: ListState::default(),
+            reflog_state: ListState::default(),
+            command_state: ListState::default(),
+            files_state: ListState::default(),
+
+            diff_lines: Vec::new(),
+            diff_scroll_y: 0,
+            diff_scroll_x: 0,
+
+            inspect: InspectUi::new(),
+            status: None,
+        }
+    }
+
+    fn set_subtab(&mut self, subtab: LogSubTab) {
+        if self.subtab == subtab {
+            return;
+        }
+
+        self.subtab = subtab;
+        self.focus = LogPaneFocus::Commits;
+        self.diff_scroll_y = 0;
+        self.diff_scroll_x = 0;
+
+        match self.subtab {
+            LogSubTab::History => {}
+            LogSubTab::Reflog => {}
+            LogSubTab::Commands => {
+                self.command_state.select(Some(0));
+            }
+        }
+    }
+
+    fn set_detail_mode(&mut self, mode: LogDetailMode) {
+        if self.detail_mode == mode {
+            return;
+        }
+        self.detail_mode = mode;
+        self.diff_scroll_y = 0;
+        self.diff_scroll_x = 0;
+
+        match mode {
+            LogDetailMode::Files if self.subtab != LogSubTab::Commands => {
+                self.focus = LogPaneFocus::Files;
+            }
+            LogDetailMode::Diff => {
+                self.focus = LogPaneFocus::Diff;
+            }
+            _ => {}
+        }
+
+        if mode != LogDetailMode::Files {
+            self.files.clear();
+            self.files_hash = None;
+            self.files_state.select(None);
+        }
+    }
+
+    fn active_state(&self) -> &ListState {
+        match self.subtab {
+            LogSubTab::History => &self.history_state,
+            LogSubTab::Reflog => &self.reflog_state,
+            LogSubTab::Commands => &self.command_state,
+        }
+    }
+
+    fn active_state_mut(&mut self) -> &mut ListState {
+        match self.subtab {
+            LogSubTab::History => &mut self.history_state,
+            LogSubTab::Reflog => &mut self.reflog_state,
+            LogSubTab::Commands => &mut self.command_state,
+        }
+    }
+}
+
+struct OperationPopup {
+    title: String,
+    body: String,
+    ok: bool,
+    scroll_y: u16,
+}
+
+impl OperationPopup {
+    fn new(title: String, body: String, ok: bool) -> Self {
+        Self {
+            title,
+            body,
+            ok,
+            scroll_y: 0,
+        }
+    }
 }
 
 enum JobResult {
@@ -259,10 +479,17 @@ struct App {
     commit: CommitState,
     pending_job: Option<PendingJob>,
     discard_confirm: Option<DiscardConfirm>,
+    operation_popup: Option<OperationPopup>,
     git_log: VecDeque<GitLogEntry>,
+    log_ui: LogUi,
+
+    wrap_diff: bool,
+    syntax_highlight: bool,
 
     explorer_preview_x: u16,
     git_diff_x: u16,
+    log_files_x: u16,
+    log_diff_x: u16,
 
     zones: Vec<ClickZone>,
     last_click: Option<(Instant, usize)>,
@@ -280,6 +507,7 @@ struct App {
 
     pending_clipboard: Option<String>,
     bookmarks_path: Option<PathBuf>,
+    ui_settings_path: Option<PathBuf>,
 }
 
 impl App {
@@ -301,10 +529,17 @@ impl App {
             commit: CommitState::new(),
             pending_job: None,
             discard_confirm: None,
+            operation_popup: None,
             git_log: VecDeque::new(),
+            log_ui: LogUi::new(),
+
+            wrap_diff: true,
+            syntax_highlight: true,
 
             explorer_preview_x: 0,
             git_diff_x: 0,
+            log_files_x: 0,
+            log_diff_x: 0,
 
             zones: Vec::new(),
             last_click: None,
@@ -327,8 +562,10 @@ impl App {
             status_ttl: Duration::from_secs(2),
             pending_clipboard: None,
             bookmarks_path: bookmarks_file_path(),
+            ui_settings_path: ui_settings_file_path(),
         };
         app.load_persisted_bookmarks();
+        app.load_persisted_ui_settings();
         app.load_files();
         if !app.files.is_empty() {
             app.list_state.select(Some(0));
@@ -370,7 +607,7 @@ impl App {
             return;
         };
 
-        match git_ops::list_local_branches(&repo_root) {
+        match git_ops::list_branches(&repo_root) {
             Ok(branches) => {
                 self.branch_ui.open = true;
                 self.branch_ui.query.clear();
@@ -400,10 +637,11 @@ impl App {
             return;
         };
 
-        let Some(name) = self.branch_ui.selected_branch_name() else {
+        let Some(branch) = self.branch_ui.selected_branch() else {
             self.branch_ui.status = Some("No branch selected".to_string());
             return;
         };
+        let name = branch.name.clone();
 
         if !force {
             match git_ops::is_dirty(&repo_root) {
@@ -419,9 +657,13 @@ impl App {
             }
         }
 
-        let cmd = format!("git checkout {}", name);
+        let cmd = if branch.is_remote {
+            format!("git checkout --track {}", name)
+        } else {
+            format!("git checkout {}", name)
+        };
         self.start_git_job(cmd, true, false, move || {
-            git_ops::checkout_branch(&repo_root, &name)
+            git_ops::checkout_branch_entry(&repo_root, &branch)
         });
         self.close_branch_picker();
     }
@@ -478,6 +720,312 @@ impl App {
         while self.git_log.len() > 200 {
             self.git_log.pop_back();
         }
+
+        if self.log_ui.subtab == LogSubTab::Commands
+            && self.log_ui.command_state.selected().is_none()
+        {
+            self.log_ui.command_state.select(Some(0));
+            self.refresh_log_diff();
+        }
+    }
+
+    fn refresh_log_data(&mut self) {
+        self.log_ui.status = None;
+
+        let Some(repo_root) = self.git.repo_root.clone() else {
+            self.log_ui.history.clear();
+            self.log_ui.reflog.clear();
+            self.log_ui.history_state.select(None);
+            self.log_ui.reflog_state.select(None);
+            self.refresh_log_diff();
+            return;
+        };
+
+        match git_ops::list_history(&repo_root, 200) {
+            Ok(items) => {
+                self.log_ui.history = items;
+                if self.log_ui.history.is_empty() {
+                    self.log_ui.history_state.select(None);
+                } else if self
+                    .log_ui
+                    .history_state
+                    .selected()
+                    .map(|i| i >= self.log_ui.history.len())
+                    .unwrap_or(true)
+                {
+                    self.log_ui.history_state.select(Some(0));
+                }
+            }
+            Err(e) => {
+                self.log_ui.status = Some(e);
+                self.log_ui.history.clear();
+                self.log_ui.history_state.select(None);
+            }
+        }
+
+        match git_ops::list_reflog(&repo_root, 200) {
+            Ok(items) => {
+                self.log_ui.reflog = items;
+                if self.log_ui.reflog.is_empty() {
+                    self.log_ui.reflog_state.select(None);
+                } else if self
+                    .log_ui
+                    .reflog_state
+                    .selected()
+                    .map(|i| i >= self.log_ui.reflog.len())
+                    .unwrap_or(true)
+                {
+                    self.log_ui.reflog_state.select(Some(0));
+                }
+            }
+            Err(e) => {
+                self.log_ui.status = Some(e);
+                self.log_ui.reflog.clear();
+                self.log_ui.reflog_state.select(None);
+            }
+        }
+
+        self.refresh_log_diff();
+    }
+
+    fn refresh_log_diff(&mut self) {
+        self.log_ui.diff_lines.clear();
+
+        match self.log_ui.subtab {
+            LogSubTab::History => {
+                let Some(repo_root) = self.git.repo_root.clone() else {
+                    self.log_ui
+                        .diff_lines
+                        .push("Not a git repository".to_string());
+                    return;
+                };
+                let Some(sel) = self.log_ui.history_state.selected() else {
+                    self.log_ui.diff_lines.push("No commits".to_string());
+                    return;
+                };
+                let Some(entry) = self.log_ui.history.get(sel) else {
+                    return;
+                };
+                let hash = entry.hash.clone();
+
+                self.refresh_log_commit_view(&repo_root, &hash);
+            }
+            LogSubTab::Reflog => {
+                let Some(repo_root) = self.git.repo_root.clone() else {
+                    self.log_ui
+                        .diff_lines
+                        .push("Not a git repository".to_string());
+                    return;
+                };
+                let Some(sel) = self.log_ui.reflog_state.selected() else {
+                    self.log_ui.diff_lines.push("No reflog entries".to_string());
+                    return;
+                };
+                let Some(entry) = self.log_ui.reflog.get(sel) else {
+                    return;
+                };
+                let hash = entry.hash.clone();
+
+                self.refresh_log_commit_view(&repo_root, &hash);
+            }
+            LogSubTab::Commands => {
+                let Some(sel) = self.log_ui.command_state.selected() else {
+                    self.log_ui.diff_lines.push("No commands".to_string());
+                    return;
+                };
+                let Some(entry) = self.git_log.get(sel) else {
+                    return;
+                };
+                self.log_ui
+                    .diff_lines
+                    .push(format!("Command: {}", entry.cmd));
+                self.log_ui
+                    .diff_lines
+                    .push(format!("Result: {}", if entry.ok { "OK" } else { "Error" }));
+                self.log_ui.diff_lines.push(String::new());
+                if let Some(detail) = entry.detail.as_deref() {
+                    if detail.trim().is_empty() {
+                        self.log_ui.diff_lines.push("(no output)".to_string());
+                    } else {
+                        self.log_ui
+                            .diff_lines
+                            .extend(detail.lines().map(|l| l.to_string()));
+                    }
+                } else {
+                    self.log_ui.diff_lines.push("(no output)".to_string());
+                }
+            }
+        }
+    }
+
+    fn refresh_log_commit_view(&mut self, repo_root: &PathBuf, hash: &str) {
+        match self.log_ui.detail_mode {
+            LogDetailMode::Diff => match git_ops::show_commit(repo_root, hash) {
+                Ok(text) => {
+                    self.log_ui
+                        .diff_lines
+                        .extend(text.lines().map(|l| l.to_string()));
+                }
+                Err(e) => {
+                    self.log_ui
+                        .diff_lines
+                        .push(format!("git show failed: {}", e));
+                }
+            },
+            LogDetailMode::Files => {
+                let needs_reload = self
+                    .log_ui
+                    .files_hash
+                    .as_deref()
+                    .map(|h| h != hash)
+                    .unwrap_or(true);
+
+                if needs_reload {
+                    self.log_ui.files_hash = Some(hash.to_string());
+                    match git_ops::list_commit_files(repo_root, hash) {
+                        Ok(files) => {
+                            self.log_ui.files = files;
+                            if self.log_ui.files.is_empty() {
+                                self.log_ui.files_state.select(None);
+                            } else {
+                                self.log_ui.files_state.select(Some(0));
+                            }
+                        }
+                        Err(e) => {
+                            self.log_ui.files.clear();
+                            self.log_ui.files_state.select(None);
+                            self.log_ui
+                                .diff_lines
+                                .push(format!("git show failed: {}", e));
+                            return;
+                        }
+                    }
+                }
+
+                let Some(sel) = self.log_ui.files_state.selected() else {
+                    self.log_ui.diff_lines.push("No files".to_string());
+                    return;
+                };
+                let Some(file) = self.log_ui.files.get(sel) else {
+                    return;
+                };
+
+                match git_ops::show_commit_file_diff(repo_root, hash, &file.path) {
+                    Ok(text) => {
+                        if text.trim().is_empty() {
+                            self.log_ui.diff_lines.push("(no diff)".to_string());
+                        } else {
+                            self.log_ui
+                                .diff_lines
+                                .extend(text.lines().map(|l| l.to_string()));
+                        }
+                    }
+                    Err(e) => {
+                        self.log_ui
+                            .diff_lines
+                            .push(format!("git show failed: {}", e));
+                    }
+                }
+            }
+        }
+    }
+
+    fn active_log_len(&self) -> usize {
+        match self.log_ui.subtab {
+            LogSubTab::History => self.log_ui.history.len(),
+            LogSubTab::Reflog => self.log_ui.reflog.len(),
+            LogSubTab::Commands => self.git_log.len(),
+        }
+    }
+
+    fn set_log_subtab(&mut self, subtab: LogSubTab) {
+        self.log_ui.inspect.close();
+        self.log_ui.set_subtab(subtab);
+
+        if self.log_ui.subtab == LogSubTab::Commands {
+            if self.git_log.is_empty() {
+                self.log_ui.command_state.select(None);
+            } else if self
+                .log_ui
+                .command_state
+                .selected()
+                .map(|i| i >= self.git_log.len())
+                .unwrap_or(true)
+            {
+                self.log_ui.command_state.select(Some(0));
+            }
+        } else {
+            if self.log_ui.subtab == LogSubTab::History && !self.log_ui.history.is_empty() {
+                if self
+                    .log_ui
+                    .history_state
+                    .selected()
+                    .map(|i| i >= self.log_ui.history.len())
+                    .unwrap_or(true)
+                {
+                    self.log_ui.history_state.select(Some(0));
+                }
+            }
+            if self.log_ui.subtab == LogSubTab::Reflog && !self.log_ui.reflog.is_empty() {
+                if self
+                    .log_ui
+                    .reflog_state
+                    .selected()
+                    .map(|i| i >= self.log_ui.reflog.len())
+                    .unwrap_or(true)
+                {
+                    self.log_ui.reflog_state.select(Some(0));
+                }
+            }
+        }
+
+        self.refresh_log_diff();
+    }
+
+    fn select_log_item(&mut self, idx: usize) {
+        if idx >= self.active_log_len() {
+            return;
+        }
+        self.log_ui.active_state_mut().select(Some(idx));
+        self.log_ui.focus = LogPaneFocus::Commits;
+        self.log_ui.diff_scroll_y = 0;
+        self.log_ui.diff_scroll_x = 0;
+        self.refresh_log_diff();
+    }
+
+    fn select_log_file(&mut self, idx: usize) {
+        if idx >= self.log_ui.files.len() {
+            return;
+        }
+        self.log_ui.files_state.select(Some(idx));
+        self.log_ui.focus = LogPaneFocus::Files;
+        self.log_ui.diff_scroll_y = 0;
+        self.log_ui.diff_scroll_x = 0;
+        self.refresh_log_diff();
+    }
+
+    fn move_log_file_selection(&mut self, delta: i32) {
+        let len = self.log_ui.files.len();
+        if len == 0 {
+            self.log_ui.files_state.select(None);
+            return;
+        }
+
+        let cur = self.log_ui.files_state.selected().unwrap_or(0) as i32;
+        let next = (cur + delta).clamp(0, len.saturating_sub(1) as i32);
+        self.select_log_file(next as usize);
+    }
+
+    fn move_log_selection(&mut self, delta: i32) {
+        let len = self.active_log_len();
+        if len == 0 {
+            self.log_ui.active_state_mut().select(None);
+            return;
+        }
+
+        let cur = self.log_ui.active_state().selected().unwrap_or(0) as i32;
+        let next = (cur + delta).clamp(0, len.saturating_sub(1) as i32);
+        self.select_log_item(next as usize);
     }
 
     fn start_git_job<F>(&mut self, cmd: String, refresh: bool, close_commit: bool, f: F)
@@ -553,11 +1101,30 @@ impl App {
 
                 if refresh {
                     self.refresh_git_state();
+                    if self.current_tab == Tab::Log {
+                        self.refresh_log_data();
+                    }
                 }
 
                 if close_commit {
                     self.commit.busy = false;
                 }
+
+                let wants_popup = !close_commit
+                    && matches!(
+                        cmd.as_str(),
+                        "git fetch --prune" | "git pull --rebase" | "git push"
+                    );
+
+                let popup = if wants_popup {
+                    let (ok, body) = match &result {
+                        Ok(()) => (true, "Success".to_string()),
+                        Err(e) => (false, e.clone()),
+                    };
+                    Some(OperationPopup::new(cmd.clone(), body, ok))
+                } else {
+                    None
+                };
 
                 match result {
                     Ok(()) => {
@@ -593,6 +1160,10 @@ impl App {
                             self.set_status(e);
                         }
                     }
+                }
+
+                if let Some(popup) = popup {
+                    self.operation_popup = Some(popup);
                 }
             }
             JobResult::Ai { result } => {
@@ -933,6 +1504,8 @@ impl App {
             return;
         }
 
+        self.set_status(format!("Running: {}", cmd));
+
         match cmd {
             "git merge --continue" => {
                 self.start_git_job(cmd.to_string(), refresh, false, move || {
@@ -1230,6 +1803,52 @@ impl App {
         }
     }
 
+    fn load_persisted_ui_settings(&mut self) {
+        let Some(path) = self.ui_settings_path.clone() else {
+            return;
+        };
+
+        let data = fs::read_to_string(&path).ok();
+        let Some(data) = data else {
+            return;
+        };
+
+        let settings: PersistedUiSettings = match serde_json::from_str(&data) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        if let Some(w) = settings.log_left_width {
+            self.log_ui.left_width = w.clamp(32, 90);
+        }
+    }
+
+    fn save_persisted_ui_settings(&mut self) {
+        let Some(path) = self.ui_settings_path.clone() else {
+            return;
+        };
+
+        let settings = PersistedUiSettings {
+            log_left_width: Some(self.log_ui.left_width),
+        };
+
+        let content = match serde_json::to_string(&settings) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        if let Some(parent) = path.parent() {
+            if fs::create_dir_all(parent).is_err() {
+                return;
+            }
+        }
+
+        let tmp = path.with_extension("tmp");
+        if fs::write(&tmp, content).is_err() || fs::rename(&tmp, &path).is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+    }
+
     fn update_preview(&mut self) {
         self.preview_error = None;
 
@@ -1367,6 +1986,8 @@ impl App {
                 self.context_menu = None;
                 if tab == Tab::Git {
                     self.refresh_git_state();
+                } else if tab == Tab::Log {
+                    self.refresh_log_data();
                 }
             }
             AppAction::RefreshGit => {
@@ -1458,7 +2079,59 @@ impl App {
             }
             AppAction::ClearGitLog => {
                 self.git_log.clear();
-                self.set_status("Log cleared");
+                self.log_ui.command_state.select(None);
+                self.log_ui.diff_lines.clear();
+                self.set_status("Commands cleared");
+            }
+            AppAction::LogSwitch(subtab) => {
+                self.set_log_subtab(subtab);
+            }
+            AppAction::LogDetail(mode) => {
+                self.log_ui.inspect.close();
+                self.log_ui.set_detail_mode(mode);
+                self.refresh_log_diff();
+            }
+            AppAction::LogToggleZoom => {
+                self.toggle_log_zoom();
+            }
+            AppAction::LogInspect => {
+                self.open_log_inspect();
+            }
+            AppAction::LogCloseInspect => {
+                self.log_ui.inspect.close();
+            }
+            AppAction::LogInspectCopyPrimary => {
+                if let Some(s) = self
+                    .selected_log_hash()
+                    .or_else(|| self.selected_log_command())
+                {
+                    self.request_copy_to_clipboard(s);
+                }
+            }
+            AppAction::LogInspectCopySecondary => {
+                if let Some(s) = self.selected_log_subject() {
+                    self.request_copy_to_clipboard(s);
+                } else if !self.log_ui.inspect.body.is_empty() {
+                    self.request_copy_to_clipboard(self.log_ui.inspect.body.clone());
+                }
+            }
+            AppAction::LogFocusDiff => {
+                self.log_ui.focus = LogPaneFocus::Diff;
+            }
+            AppAction::LogFocusFiles => {
+                self.log_ui.focus = LogPaneFocus::Files;
+            }
+            AppAction::LogAdjustLeft(delta) => {
+                self.adjust_log_left_width(delta);
+            }
+            AppAction::SelectLogItem(idx) => {
+                self.select_log_item(idx);
+            }
+            AppAction::SelectLogFile(idx) => {
+                self.select_log_file(idx);
+            }
+            AppAction::CloseOperationPopup => {
+                self.operation_popup = None;
             }
             AppAction::MergeContinue => self.start_operation_job("git merge --continue", true),
             AppAction::MergeAbort => self.start_operation_job("git merge --abort", true),
@@ -1569,6 +2242,9 @@ impl App {
                     self.git.selection_anchor = Some(idx);
                 }
             }
+            AppAction::SelectLogItem(idx) => {
+                self.select_log_item(idx);
+            }
             _ => {}
         }
     }
@@ -1609,6 +2285,13 @@ impl App {
                 }
 
                 options.push((" ✏️  Rename (TODO) ".to_string(), ContextCommand::Rename));
+
+                if self.git.repo_root.is_some() {
+                    options.push((
+                        " 🙈 Add to .gitignore ".to_string(),
+                        ContextCommand::GitAddToGitignore,
+                    ));
+                }
             }
             Tab::Git => {
                 let paths = self.selected_git_paths();
@@ -1630,6 +2313,13 @@ impl App {
                 options.push((" Stage All ".to_string(), ContextCommand::GitStageAll));
                 options.push((" Unstage All ".to_string(), ContextCommand::GitUnstageAll));
 
+                let ignore_label = if paths.len() <= 1 {
+                    " 🙈 Add to .gitignore ".to_string()
+                } else {
+                    format!(" 🙈 Add to .gitignore ({}) ", paths.len())
+                };
+                options.push((ignore_label, ContextCommand::GitAddToGitignore));
+
                 options.push((" 📋 Copy Path ".to_string(), ContextCommand::GitCopyPath));
                 options.push((
                     " 📄 Copy Relative Path ".to_string(),
@@ -1640,9 +2330,63 @@ impl App {
                     ContextCommand::GitOpenInExplorer,
                 ));
             }
-            Tab::Log => {
-                return;
-            }
+            Tab::Log => match self.log_ui.subtab {
+                LogSubTab::History => {
+                    let Some(entry) = self
+                        .log_ui
+                        .history_state
+                        .selected()
+                        .and_then(|i| self.log_ui.history.get(i))
+                    else {
+                        return;
+                    };
+
+                    options.push((" 📋 Copy SHA ".to_string(), ContextCommand::LogCopySha));
+                    options.push((
+                        " 📋 Copy Subject ".to_string(),
+                        ContextCommand::LogCopySubject,
+                    ));
+                    options.push((
+                        format!(" ⎇ Checkout {}… ", entry.short),
+                        ContextCommand::LogCheckoutDetached,
+                    ));
+                }
+                LogSubTab::Reflog => {
+                    let Some(entry) = self
+                        .log_ui
+                        .reflog_state
+                        .selected()
+                        .and_then(|i| self.log_ui.reflog.get(i))
+                    else {
+                        return;
+                    };
+
+                    options.push((" 📋 Copy SHA ".to_string(), ContextCommand::LogCopySha));
+                    options.push((
+                        " 📋 Copy Subject ".to_string(),
+                        ContextCommand::LogCopySubject,
+                    ));
+                    options.push((
+                        format!(" ⎇ Checkout {}… ", entry.selector),
+                        ContextCommand::LogCheckoutDetached,
+                    ));
+                }
+                LogSubTab::Commands => {
+                    let Some(entry) = self
+                        .log_ui
+                        .command_state
+                        .selected()
+                        .and_then(|i| self.git_log.get(i))
+                    else {
+                        return;
+                    };
+                    options.push((
+                        " 📋 Copy Command ".to_string(),
+                        ContextCommand::LogCopyCommand,
+                    ));
+                    let _ = entry;
+                }
+            },
         }
 
         self.context_menu = Some(ContextMenu {
@@ -1721,6 +2465,25 @@ impl App {
                 ContextCommand::GitOpenInExplorer => self.open_selected_git_path_in_explorer(),
                 ContextCommand::GitCopyPath => self.copy_selected_git_path(true),
                 ContextCommand::GitCopyRelPath => self.copy_selected_git_path(false),
+                ContextCommand::GitAddToGitignore => self.add_selected_to_gitignore(),
+                ContextCommand::LogCopySha => {
+                    if let Some(hash) = self.selected_log_hash() {
+                        self.request_copy_to_clipboard(hash);
+                    }
+                }
+                ContextCommand::LogCopySubject => {
+                    if let Some(s) = self.selected_log_subject() {
+                        self.request_copy_to_clipboard(s);
+                    }
+                }
+                ContextCommand::LogCopyCommand => {
+                    if let Some(s) = self.selected_log_command() {
+                        self.request_copy_to_clipboard(s);
+                    }
+                }
+                ContextCommand::LogCheckoutDetached => {
+                    self.checkout_detached_selected_log();
+                }
             }
         }
         self.context_menu = None;
@@ -1734,6 +2497,231 @@ impl App {
             .selected_entry()
             .map(|e| vec![e.path.clone()])
             .unwrap_or_default()
+    }
+
+    fn selected_log_hash(&self) -> Option<String> {
+        match self.log_ui.subtab {
+            LogSubTab::History => self
+                .log_ui
+                .history_state
+                .selected()
+                .and_then(|i| self.log_ui.history.get(i))
+                .map(|e| e.hash.clone()),
+            LogSubTab::Reflog => self
+                .log_ui
+                .reflog_state
+                .selected()
+                .and_then(|i| self.log_ui.reflog.get(i))
+                .map(|e| e.hash.clone()),
+            LogSubTab::Commands => None,
+        }
+    }
+
+    fn selected_log_subject(&self) -> Option<String> {
+        match self.log_ui.subtab {
+            LogSubTab::History => self
+                .log_ui
+                .history_state
+                .selected()
+                .and_then(|i| self.log_ui.history.get(i))
+                .map(|e| e.subject.clone()),
+            LogSubTab::Reflog => self
+                .log_ui
+                .reflog_state
+                .selected()
+                .and_then(|i| self.log_ui.reflog.get(i))
+                .map(|e| e.subject.clone()),
+            LogSubTab::Commands => None,
+        }
+    }
+
+    fn selected_log_command(&self) -> Option<String> {
+        if self.log_ui.subtab != LogSubTab::Commands {
+            return None;
+        }
+        let sel = self.log_ui.command_state.selected()?;
+        let entry = self.git_log.get(sel)?;
+        Some(entry.cmd.clone())
+    }
+
+    fn checkout_detached_selected_log(&mut self) {
+        if self.pending_job.is_some() {
+            self.set_status("Busy");
+            return;
+        }
+
+        let Some(repo_root) = self.git.repo_root.clone() else {
+            self.set_status("Not a git repository");
+            return;
+        };
+
+        let Some(hash) = self.selected_log_hash() else {
+            self.set_status("No selection");
+            return;
+        };
+
+        match git_ops::is_dirty(&repo_root) {
+            Ok(true) => {
+                self.set_status("Working tree dirty; checkout blocked");
+                return;
+            }
+            Ok(false) => {}
+            Err(e) => {
+                self.set_status(e);
+                return;
+            }
+        }
+
+        let short = hash.chars().take(7).collect::<String>();
+        let cmd = format!("git checkout --detach {}", short);
+        self.start_git_job(cmd, true, false, move || {
+            git_ops::checkout_detached(&repo_root, &hash)
+        });
+    }
+
+    fn open_log_inspect(&mut self) {
+        let (title, body) = match self.log_ui.subtab {
+            LogSubTab::History => {
+                let Some(sel) = self.log_ui.history_state.selected() else {
+                    self.set_status("No selection");
+                    return;
+                };
+                let Some(e) = self.log_ui.history.get(sel) else {
+                    self.set_status("No selection");
+                    return;
+                };
+
+                let mut body = String::new();
+                body.push_str("SHA: ");
+                body.push_str(&e.hash);
+                body.push('\n');
+                body.push_str("Date: ");
+                body.push_str(&e.date);
+                body.push('\n');
+                body.push_str("Author: ");
+                body.push_str(&e.author);
+                body.push('\n');
+                body.push('\n');
+                body.push_str("Subject:\n");
+                body.push_str(&e.subject);
+                body.push('\n');
+
+                (format!("Inspect {}", e.short), body)
+            }
+            LogSubTab::Reflog => {
+                let Some(sel) = self.log_ui.reflog_state.selected() else {
+                    self.set_status("No selection");
+                    return;
+                };
+                let Some(e) = self.log_ui.reflog.get(sel) else {
+                    self.set_status("No selection");
+                    return;
+                };
+
+                let mut body = String::new();
+                body.push_str("SHA: ");
+                body.push_str(&e.hash);
+                body.push('\n');
+                body.push_str("Selector: ");
+                body.push_str(&e.selector);
+                body.push('\n');
+                body.push('\n');
+                body.push_str("Subject:\n");
+                body.push_str(&e.subject);
+                body.push('\n');
+
+                (format!("Inspect {}", e.selector), body)
+            }
+            LogSubTab::Commands => {
+                let Some(sel) = self.log_ui.command_state.selected() else {
+                    self.set_status("No selection");
+                    return;
+                };
+                let Some(e) = self.git_log.get(sel) else {
+                    self.set_status("No selection");
+                    return;
+                };
+
+                let mut body = String::new();
+                body.push_str("Command:\n");
+                body.push_str(&e.cmd);
+                body.push('\n');
+                body.push('\n');
+                body.push_str("Output:\n");
+                if let Some(d) = e.detail.as_deref() {
+                    body.push_str(d);
+                    if !d.ends_with('\n') {
+                        body.push('\n');
+                    }
+                } else {
+                    body.push_str("(no output)\n");
+                }
+
+                ("Inspect Command".to_string(), body)
+            }
+        };
+
+        self.log_ui.inspect.open = true;
+        self.log_ui.inspect.scroll_y = 0;
+        self.log_ui.inspect.title = title;
+        self.log_ui.inspect.body = body;
+        self.context_menu = None;
+    }
+
+    fn toggle_log_zoom(&mut self) {
+        let next = match self.log_ui.zoom {
+            LogZoom::None => LogZoom::Diff,
+            LogZoom::Diff => LogZoom::List,
+            LogZoom::List => LogZoom::None,
+        };
+        self.log_ui.zoom = next;
+
+        match next {
+            LogZoom::Diff => self.log_ui.focus = LogPaneFocus::Diff,
+            LogZoom::List => self.log_ui.focus = LogPaneFocus::Commits,
+            LogZoom::None => {}
+        }
+    }
+
+    fn cycle_log_focus(&mut self) {
+        let files_mode = self.log_ui.detail_mode == LogDetailMode::Files
+            && self.log_ui.subtab != LogSubTab::Commands;
+
+        match self.log_ui.zoom {
+            LogZoom::List => {
+                self.log_ui.focus = LogPaneFocus::Commits;
+            }
+            LogZoom::Diff => {
+                if files_mode {
+                    self.log_ui.focus = match self.log_ui.focus {
+                        LogPaneFocus::Files => LogPaneFocus::Diff,
+                        _ => LogPaneFocus::Files,
+                    };
+                } else {
+                    self.log_ui.focus = LogPaneFocus::Diff;
+                }
+            }
+            LogZoom::None => {
+                if files_mode {
+                    self.log_ui.focus = match self.log_ui.focus {
+                        LogPaneFocus::Commits => LogPaneFocus::Files,
+                        LogPaneFocus::Files => LogPaneFocus::Diff,
+                        LogPaneFocus::Diff => LogPaneFocus::Commits,
+                    };
+                } else {
+                    self.log_ui.focus = match self.log_ui.focus {
+                        LogPaneFocus::Diff => LogPaneFocus::Commits,
+                        _ => LogPaneFocus::Diff,
+                    };
+                }
+            }
+        }
+    }
+
+    fn adjust_log_left_width(&mut self, delta: i16) {
+        let cur = self.log_ui.left_width as i16;
+        let next = (cur + delta).clamp(32, 90);
+        self.log_ui.left_width = next as u16;
     }
 
     fn copy_selected_git_path(&mut self, absolute: bool) {
@@ -1782,6 +2770,70 @@ impl App {
             self.update_preview();
         }
     }
+
+    fn add_selected_to_gitignore(&mut self) {
+        if self.git.repo_root.is_none() {
+            self.git.refresh(&self.current_path);
+        }
+
+        let Some(repo_root) = self.git.repo_root.clone() else {
+            self.set_status("Not a git repository");
+            return;
+        };
+
+        let mut patterns: Vec<String> = match self.current_tab {
+            Tab::Explorer => {
+                let Some(file) = self.selected_file() else {
+                    self.set_status("No selection");
+                    return;
+                };
+
+                let Ok(rel) = file.path.strip_prefix(&repo_root) else {
+                    self.set_status("Selection not in repo");
+                    return;
+                };
+
+                let mut p = rel.to_string_lossy().to_string();
+                if file.is_dir && !p.ends_with('/') {
+                    p.push('/');
+                }
+                vec![p]
+            }
+            Tab::Git => self.selected_git_paths(),
+            Tab::Log => {
+                self.set_status("Not available here");
+                return;
+            }
+        };
+
+        if patterns.is_empty() {
+            self.set_status("No selection");
+            return;
+        }
+
+        for p in patterns.iter_mut() {
+            let is_dir = repo_root.join(p.as_str()).is_dir();
+            if is_dir && !p.ends_with('/') {
+                p.push('/');
+            }
+        }
+
+        patterns.sort();
+        patterns.dedup();
+
+        match git_ops::add_to_gitignore(&repo_root, &patterns) {
+            Ok(0) => {
+                self.set_status("Already ignored");
+            }
+            Ok(n) => {
+                self.set_status(format!("Added {} to .gitignore", n));
+                self.refresh_git_state();
+            }
+            Err(e) => {
+                self.set_status(e);
+            }
+        }
+    }
 }
 
 fn osc52_sequence(text: &str) -> String {
@@ -1821,6 +2873,14 @@ fn bookmarks_file_path() -> Option<PathBuf> {
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));
     Some(base.join("te").join("bookmarks.tsv"))
+}
+
+fn ui_settings_file_path() -> Option<PathBuf> {
+    let home = env::home_dir()?;
+    let base = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    Some(base.join("te").join("ui.json"))
 }
 
 fn default_bookmark_paths() -> Vec<PathBuf> {
@@ -1890,7 +2950,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
     for (label, tab) in [
         (" Explorer ", Tab::Explorer),
         (" Git ", Tab::Git),
-        (" Log ", Tab::Log),
+        (" Git Log ", Tab::Log),
     ] {
         let width = label.len() as u16;
         let is_active = app.current_tab == tab;
@@ -2123,7 +3183,12 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             }
         }
         Tab::Log => {
-            let label = " Command Log ";
+            let sub = match app.log_ui.subtab {
+                LogSubTab::History => "History",
+                LogSubTab::Reflog => "Reflog",
+                LogSubTab::Commands => "Commands",
+            };
+            let label = format!(" Git Log: {} ", sub);
             let width = label.len() as u16;
             f.render_widget(
                 Paragraph::new(label).style(Style::default().fg(theme::FG)),
@@ -2313,7 +3378,20 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     String::new()
                 };
 
-                let lines: Vec<Line> = preview_text.lines().map(Line::raw).collect();
+                let lines: Vec<Line> = if app.syntax_highlight {
+                    app.selected_file()
+                        .and_then(|f| {
+                            if f.is_dir {
+                                return None;
+                            }
+                            f.path.extension().and_then(|s| s.to_str()).and_then(|ext| {
+                                highlight::highlight_text(&preview_text, ext, theme::BG)
+                            })
+                        })
+                        .unwrap_or_else(|| preview_text.lines().map(Line::raw).collect())
+                } else {
+                    preview_text.lines().map(Line::raw).collect()
+                };
                 let p_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
@@ -2665,12 +3743,82 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     vec![Line::raw("No selection")]
                 } else {
                     match app.git.diff_mode {
-                        GitDiffMode::Unified => app
-                            .git
-                            .diff_lines
-                            .iter()
-                            .map(|l| Line::raw(l.as_str()))
-                            .collect(),
+                        GitDiffMode::Unified => {
+                            let ext = app
+                                .git
+                                .selected_entry()
+                                .and_then(|e| std::path::Path::new(e.path.as_str()).extension())
+                                .and_then(|s| s.to_str());
+
+                            let mut highlighter: Option<Highlighter> = if app.syntax_highlight {
+                                ext.and_then(new_highlighter)
+                            } else {
+                                None
+                            };
+
+                            let mut out = Vec::new();
+                            for l in &app.git.diff_lines {
+                                let t = l.as_str();
+                                if t.starts_with("@@") {
+                                    out.push(Line::from(vec![Span::styled(
+                                        t.to_string(),
+                                        Style::default().fg(theme::BTN_FG).bg(theme::DIFF_HUNK_BG),
+                                    )]));
+                                    continue;
+                                }
+
+                                if t.starts_with("diff --git") {
+                                    out.push(Line::from(vec![Span::styled(
+                                        t.to_string(),
+                                        Style::default().fg(theme::ACCENT_PRIMARY),
+                                    )]));
+                                    continue;
+                                }
+
+                                if t.starts_with("index ")
+                                    || t.starts_with("--- ")
+                                    || t.starts_with("+++ ")
+                                    || t.starts_with("rename ")
+                                {
+                                    out.push(Line::from(vec![Span::styled(
+                                        t.to_string(),
+                                        Style::default().fg(theme::BORDER_INACTIVE),
+                                    )]));
+                                    continue;
+                                }
+
+                                let (prefix, code) =
+                                    t.split_at(t.chars().next().map(|c| c.len_utf8()).unwrap_or(0));
+                                let (bg, is_code) = match prefix {
+                                    "+" if !t.starts_with("+++") => (theme::DIFF_ADD_BG, true),
+                                    "-" if !t.starts_with("---") => (theme::DIFF_DEL_BG, true),
+                                    " " => (theme::BG, true),
+                                    _ => (theme::BG, false),
+                                };
+
+                                if is_code {
+                                    if let Some(hl) = highlighter.as_mut() {
+                                        out.push(hl.highlight_diff_code_with_prefix(
+                                            prefix,
+                                            code,
+                                            Style::default().fg(theme::FG),
+                                            bg,
+                                        ));
+                                    } else {
+                                        out.push(Line::from(vec![Span::styled(
+                                            t.to_string(),
+                                            Style::default().fg(theme::FG).bg(bg),
+                                        )]));
+                                    }
+                                } else {
+                                    out.push(Line::from(vec![Span::styled(
+                                        t.to_string(),
+                                        Style::default().fg(theme::FG).bg(bg),
+                                    )]));
+                                }
+                            }
+                            out
+                        }
                         GitDiffMode::SideBySide => {
                             let inner_w = diff_area.width.saturating_sub(2) as usize;
                             let sep_w = 1usize;
@@ -2760,59 +3908,528 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     }
                 };
 
-                let x_scroll = if app.git.diff_mode == GitDiffMode::Unified {
+                let wrap = app.git.diff_mode == GitDiffMode::Unified && app.wrap_diff;
+
+                let viewport_h = diff_area.height.saturating_sub(2) as usize;
+                let max_y = if viewport_h == 0 {
+                    0
+                } else if wrap {
+                    app.git
+                        .diff_lines
+                        .iter()
+                        .map(|l| {
+                            let w = (diff_area.width.saturating_sub(2).max(1)) as usize;
+                            let chars = l.chars().count().max(1);
+                            (chars + w - 1) / w
+                        })
+                        .sum::<usize>()
+                        .saturating_sub(viewport_h)
+                } else {
+                    match app.git.diff_mode {
+                        GitDiffMode::Unified => app.git.diff_lines.len().saturating_sub(viewport_h),
+                        GitDiffMode::SideBySide => build_side_by_side_rows(&app.git.diff_lines)
+                            .len()
+                            .saturating_sub(viewport_h),
+                    }
+                };
+                app.git.diff_scroll_y = app.git.diff_scroll_y.min(max_y as u16);
+
+                let x_scroll = if app.git.diff_mode == GitDiffMode::Unified && !wrap {
                     app.git.diff_scroll_x
                 } else {
                     0
                 };
-                let diff_para = Paragraph::new(diff_lines)
+                let mut diff_para = Paragraph::new(diff_lines)
                     .block(diff_block)
                     .scroll((app.git.diff_scroll_y, x_scroll));
+                if wrap {
+                    diff_para = diff_para.wrap(Wrap { trim: false });
+                }
 
                 f.render_widget(diff_para, diff_area);
             }
         }
         Tab::Log => {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme::BORDER_INACTIVE))
-                .title(" Log ");
-            f.render_widget(block, content_area);
-            let inner = content_area.inner(Margin {
-                vertical: 1,
-                horizontal: 1,
-            });
+            let zoom = app.log_ui.zoom;
 
-            let now = Instant::now();
-            let mut lines: Vec<Line> = Vec::new();
-            if app.git_log.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    "No git commands yet",
-                    Style::default().fg(theme::BORDER_INACTIVE),
-                )));
+            let (subtab_area, list_area, diff_area) = match zoom {
+                LogZoom::None => {
+                    let chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([
+                            Constraint::Length(app.log_ui.left_width),
+                            Constraint::Min(0),
+                        ])
+                        .split(content_area);
+
+                    let left_area = chunks[0];
+                    let diff_area = chunks[1];
+                    let left_chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(1), Constraint::Min(0)])
+                        .split(left_area);
+                    (left_chunks[0], left_chunks[1], diff_area)
+                }
+                LogZoom::List => {
+                    let rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(1), Constraint::Min(0)])
+                        .split(content_area);
+                    (
+                        rows[0],
+                        rows[1],
+                        Rect::new(content_area.x, content_area.y, 0, 0),
+                    )
+                }
+                LogZoom::Diff => {
+                    let rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(1), Constraint::Min(0)])
+                        .split(content_area);
+                    (
+                        rows[0],
+                        Rect::new(content_area.x, content_area.y, 0, 0),
+                        rows[1],
+                    )
+                }
+            };
+
+            if zoom == LogZoom::List {
+                app.log_files_x = u16::MAX;
+                app.log_diff_x = u16::MAX;
             } else {
-                for e in app.git_log.iter().take(inner.height as usize) {
-                    let age = now.duration_since(e.when).as_secs();
-                    let tag = if e.ok { "ok" } else { "err" };
-                    let mut s = format!("[{tag}] +{age}s  {}", e.cmd);
-                    if let Some(d) = &e.detail {
-                        if !d.is_empty() {
-                            s.push_str(" :: ");
-                            s.push_str(d);
-                        }
+                app.log_files_x = diff_area.x;
+                app.log_diff_x = diff_area.x;
+            }
+
+            let mut x = subtab_area.x;
+            for (label, subtab) in [
+                (" History ", LogSubTab::History),
+                (" Reflog ", LogSubTab::Reflog),
+                (" Commands ", LogSubTab::Commands),
+            ] {
+                let w = label.len() as u16;
+                let active = app.log_ui.subtab == subtab;
+                let style = if active {
+                    Style::default()
+                        .bg(theme::ACCENT_PRIMARY)
+                        .fg(theme::BTN_FG)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().bg(theme::BG).fg(theme::FG)
+                };
+                let rect = Rect::new(x, subtab_area.y, w, 1);
+                f.render_widget(Paragraph::new(label).style(style), rect);
+                zones.push(ClickZone {
+                    rect,
+                    action: AppAction::LogSwitch(subtab),
+                });
+                x += w + 1;
+            }
+
+            if zoom != LogZoom::Diff {
+                let (title, items_len) = match app.log_ui.subtab {
+                    LogSubTab::History => (" History ", app.log_ui.history.len()),
+                    LogSubTab::Reflog => (" Reflog ", app.log_ui.reflog.len()),
+                    LogSubTab::Commands => (" Commands ", app.git_log.len()),
+                };
+
+                let list_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .title(format!("{}({}) ", title, items_len));
+
+                let list_items: Vec<ListItem> = match app.log_ui.subtab {
+                    LogSubTab::History => app
+                        .log_ui
+                        .history
+                        .iter()
+                        .map(|e| {
+                            ListItem::new(format!(
+                                "{}  {}  {}: {}",
+                                e.short, e.date, e.author, e.subject
+                            ))
+                        })
+                        .collect(),
+                    LogSubTab::Reflog => app
+                        .log_ui
+                        .reflog
+                        .iter()
+                        .map(|e| ListItem::new(format!("{}  {}", e.selector, e.subject)))
+                        .collect(),
+                    LogSubTab::Commands => {
+                        let now = Instant::now();
+                        app.git_log
+                            .iter()
+                            .map(|e| {
+                                let age = now.duration_since(e.when).as_secs();
+                                let tag = if e.ok { "ok" } else { "err" };
+                                ListItem::new(format!("[{tag}] +{age}s  {}", e.cmd))
+                            })
+                            .collect()
                     }
-                    lines.push(Line::raw(s));
+                };
+
+                let list = List::new(list_items)
+                    .block(list_block)
+                    .highlight_style(
+                        Style::default()
+                            .bg(theme::SELECTION_BG)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                    .highlight_symbol("▎ ");
+
+                match app.log_ui.subtab {
+                    LogSubTab::History => {
+                        f.render_stateful_widget(list, list_area, &mut app.log_ui.history_state)
+                    }
+                    LogSubTab::Reflog => {
+                        f.render_stateful_widget(list, list_area, &mut app.log_ui.reflog_state)
+                    }
+                    LogSubTab::Commands => {
+                        f.render_stateful_widget(list, list_area, &mut app.log_ui.command_state)
+                    }
+                }
+
+                let list_inner = list_area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 1,
+                });
+
+                let offset = match app.log_ui.subtab {
+                    LogSubTab::History => app.log_ui.history_state.offset(),
+                    LogSubTab::Reflog => app.log_ui.reflog_state.offset(),
+                    LogSubTab::Commands => app.log_ui.command_state.offset(),
+                };
+
+                let end = (offset + list_inner.height as usize).min(items_len);
+                for (i, idx) in (offset..end).enumerate() {
+                    let rect =
+                        Rect::new(list_inner.x, list_inner.y + i as u16, list_inner.width, 1);
+                    zones.push(ClickZone {
+                        rect,
+                        action: AppAction::SelectLogItem(idx),
+                    });
                 }
             }
 
-            f.render_widget(
-                Paragraph::new(lines)
-                    .style(Style::default().fg(theme::FG))
-                    .wrap(Wrap { trim: false })
-                    .block(Block::default()),
-                inner,
-            );
+            if zoom != LogZoom::List {
+                let files_mode = app.log_ui.detail_mode == LogDetailMode::Files
+                    && app.log_ui.subtab != LogSubTab::Commands;
+
+                let mut diff_view_area = diff_area;
+                if files_mode {
+                    let chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Length(36), Constraint::Min(0)])
+                        .split(diff_area);
+                    let files_area = chunks[0];
+                    diff_view_area = chunks[1];
+
+                    app.log_files_x = files_area.x;
+                    app.log_diff_x = diff_view_area.x;
+
+                    let file_block = Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                        .title(format!(" Files ({}) ", app.log_ui.files.len()));
+
+                    let file_items: Vec<ListItem> = app
+                        .log_ui
+                        .files
+                        .iter()
+                        .map(|f| {
+                            let s = if let Some(old) = f.old_path.as_deref() {
+                                format!("{}  {} -> {}", f.status, old, f.path)
+                            } else {
+                                format!("{}  {}", f.status, f.path)
+                            };
+                            ListItem::new(s)
+                        })
+                        .collect();
+
+                    let file_list = List::new(file_items)
+                        .block(file_block)
+                        .highlight_style(
+                            Style::default()
+                                .bg(theme::SELECTION_BG)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .highlight_symbol("▎ ");
+
+                    f.render_stateful_widget(file_list, files_area, &mut app.log_ui.files_state);
+
+                    zones.push(ClickZone {
+                        rect: files_area,
+                        action: AppAction::LogFocusFiles,
+                    });
+
+                    let list_inner = files_area.inner(Margin {
+                        vertical: 1,
+                        horizontal: 1,
+                    });
+
+                    let items_len = app.log_ui.files.len();
+                    let offset = app.log_ui.files_state.offset();
+                    let end = (offset + list_inner.height as usize).min(items_len);
+                    for (i, idx) in (offset..end).enumerate() {
+                        let rect =
+                            Rect::new(list_inner.x, list_inner.y + i as u16, list_inner.width, 1);
+                        zones.push(ClickZone {
+                            rect,
+                            action: AppAction::SelectLogFile(idx),
+                        });
+                    }
+                } else {
+                    app.log_files_x = diff_area.x;
+                    app.log_diff_x = diff_area.x;
+                }
+
+                let diff_area = diff_view_area;
+
+                let diff_title = match app.log_ui.subtab {
+                    LogSubTab::History => match app.log_ui.detail_mode {
+                        LogDetailMode::Diff => " Commit Diff ",
+                        LogDetailMode::Files => " Changed Files ",
+                    },
+                    LogSubTab::Reflog => match app.log_ui.detail_mode {
+                        LogDetailMode::Diff => " Reflog Diff ",
+                        LogDetailMode::Files => " Changed Files ",
+                    },
+                    LogSubTab::Commands => " Command Output ",
+                };
+
+                let diff_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+                    .title(diff_title);
+
+                let diff_lines: Vec<Line> = match app.log_ui.diff_mode {
+                    GitDiffMode::Unified => {
+                        let mut out = Vec::new();
+                        let mut highlighter: Option<Highlighter> = None;
+
+                        for l in &app.log_ui.diff_lines {
+                            let t = l.as_str();
+
+                            if app.syntax_highlight {
+                                if let Some(p) = t.strip_prefix("+++ b/") {
+                                    let ext = std::path::Path::new(p)
+                                        .extension()
+                                        .and_then(|s| s.to_str());
+                                    highlighter = ext.and_then(new_highlighter);
+                                }
+                            }
+
+                            if t.starts_with("@@") {
+                                out.push(Line::from(vec![Span::styled(
+                                    t.to_string(),
+                                    Style::default().fg(theme::BTN_FG).bg(theme::DIFF_HUNK_BG),
+                                )]));
+                                continue;
+                            }
+
+                            if t.starts_with("diff --git") {
+                                out.push(Line::from(vec![Span::styled(
+                                    t.to_string(),
+                                    Style::default().fg(theme::ACCENT_PRIMARY),
+                                )]));
+                                continue;
+                            }
+
+                            if t.starts_with("index ")
+                                || t.starts_with("--- ")
+                                || t.starts_with("+++ ")
+                                || t.starts_with("rename ")
+                            {
+                                out.push(Line::from(vec![Span::styled(
+                                    t.to_string(),
+                                    Style::default().fg(theme::BORDER_INACTIVE),
+                                )]));
+                                continue;
+                            }
+
+                            let (prefix, code) =
+                                t.split_at(t.chars().next().map(|c| c.len_utf8()).unwrap_or(0));
+                            let (bg, is_code) = match prefix {
+                                "+" if !t.starts_with("+++") => (theme::DIFF_ADD_BG, true),
+                                "-" if !t.starts_with("---") => (theme::DIFF_DEL_BG, true),
+                                " " => (theme::BG, true),
+                                _ => (theme::BG, false),
+                            };
+
+                            if is_code {
+                                if let Some(hl) = highlighter.as_mut() {
+                                    out.push(hl.highlight_diff_code_with_prefix(
+                                        prefix,
+                                        code,
+                                        Style::default().fg(theme::FG),
+                                        bg,
+                                    ));
+                                } else {
+                                    out.push(Line::from(vec![Span::styled(
+                                        t.to_string(),
+                                        Style::default().fg(theme::FG).bg(bg),
+                                    )]));
+                                }
+                            } else {
+                                out.push(Line::from(vec![Span::styled(
+                                    t.to_string(),
+                                    Style::default().fg(theme::FG).bg(bg),
+                                )]));
+                            }
+                        }
+
+                        out
+                    }
+                    GitDiffMode::SideBySide => {
+                        let rows = build_side_by_side_rows(&app.log_ui.diff_lines);
+                        let mut out = Vec::new();
+                        let inner = diff_area.inner(Margin {
+                            vertical: 1,
+                            horizontal: 1,
+                        });
+                        let total_w = inner.width as usize;
+                        let sep_style = Style::default().fg(theme::BORDER_INACTIVE).bg(theme::BG);
+                        let left_w = total_w.saturating_sub(1) / 2;
+                        let right_w = total_w.saturating_sub(1) - left_w;
+
+                        for r in rows {
+                            match r {
+                                GitDiffRow::Meta(t) => {
+                                    let style = if t.starts_with("@@") {
+                                        Style::default().fg(theme::BTN_FG).bg(theme::DIFF_HUNK_BG)
+                                    } else if t.starts_with("+") {
+                                        Style::default().fg(theme::FG).bg(theme::DIFF_ADD_BG)
+                                    } else if t.starts_with("-") {
+                                        Style::default().fg(theme::FG).bg(theme::DIFF_DEL_BG)
+                                    } else if t.starts_with("diff --git") {
+                                        Style::default().fg(theme::ACCENT_PRIMARY)
+                                    } else {
+                                        Style::default().fg(theme::BORDER_INACTIVE)
+                                    };
+                                    out.push(Line::from(vec![Span::styled(t, style)]));
+                                }
+                                GitDiffRow::Split { old, new } => {
+                                    let old_cell = render_side_by_side_cell(
+                                        &old,
+                                        left_w,
+                                        app.log_ui.diff_scroll_x as usize,
+                                    );
+                                    let new_cell = render_side_by_side_cell(
+                                        &new,
+                                        right_w,
+                                        app.log_ui.diff_scroll_x as usize,
+                                    );
+
+                                    let old_style = match old.kind {
+                                        GitDiffCellKind::Delete => {
+                                            Style::default().fg(theme::FG).bg(theme::DIFF_DEL_BG)
+                                        }
+                                        GitDiffCellKind::Context => {
+                                            Style::default().fg(theme::FG).bg(theme::BG)
+                                        }
+                                        GitDiffCellKind::Add => {
+                                            Style::default().fg(theme::FG).bg(theme::BG)
+                                        }
+                                        GitDiffCellKind::Empty => Style::default()
+                                            .fg(theme::BORDER_INACTIVE)
+                                            .bg(theme::BG),
+                                    };
+                                    let new_style = match new.kind {
+                                        GitDiffCellKind::Add => {
+                                            Style::default().fg(theme::FG).bg(theme::DIFF_ADD_BG)
+                                        }
+                                        GitDiffCellKind::Context => {
+                                            Style::default().fg(theme::FG).bg(theme::BG)
+                                        }
+                                        GitDiffCellKind::Delete => {
+                                            Style::default().fg(theme::FG).bg(theme::BG)
+                                        }
+                                        GitDiffCellKind::Empty => Style::default()
+                                            .fg(theme::BORDER_INACTIVE)
+                                            .bg(theme::BG),
+                                    };
+
+                                    out.push(Line::from(vec![
+                                        Span::styled(old_cell, old_style),
+                                        Span::styled("│", sep_style),
+                                        Span::styled(new_cell, new_style),
+                                    ]));
+                                }
+                            }
+                        }
+
+                        out
+                    }
+                };
+
+                let wrap = app.log_ui.diff_mode == GitDiffMode::Unified && app.wrap_diff;
+
+                let viewport_h = diff_area.height.saturating_sub(2) as usize;
+                let max_y = if viewport_h == 0 {
+                    0
+                } else if wrap {
+                    app.log_ui
+                        .diff_lines
+                        .iter()
+                        .map(|l| {
+                            let w = (diff_area.width.saturating_sub(2).max(1)) as usize;
+                            let chars = l.chars().count().max(1);
+                            (chars + w - 1) / w
+                        })
+                        .sum::<usize>()
+                        .saturating_sub(viewport_h)
+                } else {
+                    match app.log_ui.diff_mode {
+                        GitDiffMode::Unified => {
+                            app.log_ui.diff_lines.len().saturating_sub(viewport_h)
+                        }
+                        GitDiffMode::SideBySide => build_side_by_side_rows(&app.log_ui.diff_lines)
+                            .len()
+                            .saturating_sub(viewport_h),
+                    }
+                };
+                app.log_ui.diff_scroll_y = app.log_ui.diff_scroll_y.min(max_y as u16);
+
+                let x_scroll = if app.log_ui.diff_mode == GitDiffMode::Unified && !wrap {
+                    app.log_ui.diff_scroll_x
+                } else {
+                    0
+                };
+                let mut diff_para = Paragraph::new(diff_lines)
+                    .block(diff_block)
+                    .scroll((app.log_ui.diff_scroll_y, x_scroll));
+                if wrap {
+                    diff_para = diff_para.wrap(Wrap { trim: false });
+                }
+
+                f.render_widget(diff_para, diff_area);
+                zones.push(ClickZone {
+                    rect: diff_area,
+                    action: AppAction::LogFocusDiff,
+                });
+
+                if let Some(msg) = app.log_ui.status.as_deref() {
+                    zones.push(ClickZone {
+                        rect: diff_area,
+                        action: AppAction::None,
+                    });
+                    let s = format!("Status: {}", msg);
+                    f.render_widget(
+                        Paragraph::new(s).style(Style::default().fg(theme::BTN_BG)),
+                        Rect::new(
+                            diff_area.x + 2,
+                            diff_area.y + 1,
+                            diff_area.width.saturating_sub(4),
+                            1,
+                        ),
+                    );
+                }
+            }
         }
     }
 
@@ -3113,10 +4730,64 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         }
         Tab::Log => {
             buttons.push((
-                " Clear Log ".to_string(),
-                AppAction::ClearGitLog,
+                " History (h) ".to_string(),
+                AppAction::LogSwitch(LogSubTab::History),
                 theme::ACCENT_TERTIARY,
                 true,
+            ));
+            buttons.push((
+                " Reflog (r) ".to_string(),
+                AppAction::LogSwitch(LogSubTab::Reflog),
+                theme::ACCENT_TERTIARY,
+                true,
+            ));
+            buttons.push((
+                " Cmd (c) ".to_string(),
+                AppAction::LogSwitch(LogSubTab::Commands),
+                theme::ACCENT_TERTIARY,
+                true,
+            ));
+            buttons.push((
+                " Diff (d) ".to_string(),
+                AppAction::LogDetail(LogDetailMode::Diff),
+                theme::ACCENT_PRIMARY,
+                app.log_ui.subtab != LogSubTab::Commands,
+            ));
+            buttons.push((
+                " Changed (f) ".to_string(),
+                AppAction::LogDetail(LogDetailMode::Files),
+                theme::ACCENT_PRIMARY,
+                app.log_ui.subtab != LogSubTab::Commands,
+            ));
+            buttons.push((
+                " Inspect (i) ".to_string(),
+                AppAction::LogInspect,
+                theme::ACCENT_SECONDARY,
+                true,
+            ));
+            buttons.push((
+                " Zoom (z) ".to_string(),
+                AppAction::LogToggleZoom,
+                theme::ACCENT_TERTIARY,
+                true,
+            ));
+            buttons.push((
+                " < ([) ".to_string(),
+                AppAction::LogAdjustLeft(-2),
+                theme::BTN_BG,
+                app.log_ui.zoom == LogZoom::None,
+            ));
+            buttons.push((
+                " > (]) ".to_string(),
+                AppAction::LogAdjustLeft(2),
+                theme::BTN_BG,
+                app.log_ui.zoom == LogZoom::None,
+            ));
+            buttons.push((
+                " Clear Cmd (x) ".to_string(),
+                AppAction::ClearGitLog,
+                theme::BTN_BG,
+                app.log_ui.subtab == LogSubTab::Commands,
             ));
             buttons.push((
                 " ✖ Quit (q) ".to_string(),
@@ -3238,7 +4909,8 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             .map(|idx| {
                 let b = &app.branch_ui.branches[*idx];
                 let cur = if b.is_current { "* " } else { "  " };
-                let mut s = format!("{}{}", cur, b.name);
+                let kind = if b.is_remote { "[R] " } else { "[L] " };
+                let mut s = format!("{}{}{}", cur, kind, b.name);
                 if let Some(up) = &b.upstream {
                     s.push_str("  ");
                     s.push_str(up);
@@ -3265,7 +4937,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     .fg(theme::BTN_FG)
                     .add_modifier(Modifier::BOLD),
             );
-        f.render_stateful_widget(list, rows[1], &mut app.branch_ui.list_state.clone());
+        f.render_stateful_widget(list, rows[1], &mut app.branch_ui.list_state);
 
         let list_inner = rows[1].inner(Margin {
             vertical: 1,
@@ -3373,49 +5045,184 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
     }
 
     if let Some(menu) = &app.context_menu {
-        let width = 30;
-        let height = menu.options.len() as u16 + 2;
+        let width = 30u16.min(area.width.saturating_sub(2));
+        let height = (menu.options.len() as u16 + 2).min(area.height.saturating_sub(2));
+        if width < 6 || height < 4 {
+        } else {
+            let max_x = area
+                .x
+                .saturating_add(area.width)
+                .saturating_sub(width)
+                .saturating_sub(1);
+            let max_y = area
+                .y
+                .saturating_add(area.height)
+                .saturating_sub(height)
+                .saturating_sub(1);
 
-        let area = Rect::new(
-            menu.x.min(area.width - width - 1),
-            menu.y.min(area.height - height - 1),
-            width,
-            height,
-        );
+            let menu_area = Rect::new(menu.x.min(max_x), menu.y.min(max_y), width, height);
 
-        f.render_widget(Clear, area);
+            f.render_widget(Clear, menu_area);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::ACCENT_SECONDARY))
+                .bg(theme::MENU_BG);
+
+            f.render_widget(block.clone(), menu_area);
+
+            let inner = menu_area.inner(Margin {
+                vertical: 1,
+                horizontal: 1,
+            });
+
+            let visible = (inner.height as usize).min(menu.options.len());
+            for (i, (label, _)) in menu.options.iter().take(visible).enumerate() {
+                let item_area = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+
+                let is_selected = i == menu.selected;
+                let style = if is_selected {
+                    Style::default()
+                        .bg(theme::SELECTION_BG)
+                        .fg(theme::FG)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme::FG)
+                };
+
+                f.render_widget(Paragraph::new(label.as_str()).style(style), item_area);
+
+                zones.push(ClickZone {
+                    rect: item_area,
+                    action: AppAction::ContextMenuAction(i),
+                });
+            }
+        }
+    }
+
+    if app.discard_confirm.is_none() && app.log_ui.inspect.open {
+        zones.push(ClickZone {
+            rect: area,
+            action: AppAction::LogCloseInspect,
+        });
+
+        let w = area.width.min(90).saturating_sub(2).max(50);
+        let h = area.height.min(18).saturating_sub(2).max(8);
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let modal = Rect::new(x, y, w, h);
+
+        f.render_widget(Clear, modal);
 
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme::ACCENT_SECONDARY))
-            .bg(theme::MENU_BG);
+            .title(app.log_ui.inspect.title.as_str());
+        f.render_widget(block.clone(), modal);
 
-        f.render_widget(block.clone(), area);
-
-        let inner = area.inner(Margin {
+        let inner = modal.inner(Margin {
             vertical: 1,
-            horizontal: 1,
+            horizontal: 2,
         });
 
-        for (i, (label, _)) in menu.options.iter().enumerate() {
-            let item_area = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+        let body_h = inner.height.saturating_sub(1);
+        let body_area = Rect::new(inner.x, inner.y, inner.width, body_h);
+        let buttons_y = inner.y + body_h;
 
-            let is_selected = i == menu.selected;
-            let style = if is_selected {
-                Style::default()
-                    .bg(theme::SELECTION_BG)
-                    .fg(theme::FG)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::FG)
-            };
+        let para = Paragraph::new(app.log_ui.inspect.body.as_str())
+            .wrap(Wrap { trim: false })
+            .scroll((app.log_ui.inspect.scroll_y, 0));
+        f.render_widget(para, body_area);
 
-            f.render_widget(Paragraph::new(label.as_str()).style(style), item_area);
+        let primary_label = match app.log_ui.subtab {
+            LogSubTab::Commands => " Copy Cmd (y) ".to_string(),
+            _ => " Copy SHA (y) ".to_string(),
+        };
+        let secondary_label = match app.log_ui.subtab {
+            LogSubTab::Commands => " Copy Output (Y) ".to_string(),
+            _ => " Copy Subject (Y) ".to_string(),
+        };
 
+        let mut bx = inner.x;
+        for (label, action, color) in [
+            (
+                primary_label.as_str(),
+                AppAction::LogInspectCopyPrimary,
+                theme::ACCENT_PRIMARY,
+            ),
+            (
+                secondary_label.as_str(),
+                AppAction::LogInspectCopySecondary,
+                theme::ACCENT_TERTIARY,
+            ),
+            (" Close ", AppAction::LogCloseInspect, theme::BTN_BG),
+        ] {
+            let bw = label.len() as u16;
+            let rect = Rect::new(bx, buttons_y, bw, 1);
+            let style = Style::default()
+                .bg(color)
+                .fg(theme::BTN_FG)
+                .add_modifier(Modifier::BOLD);
+            f.render_widget(Paragraph::new(label).style(style), rect);
+            zones.push(ClickZone { rect, action });
+            bx += bw + 2;
+        }
+    }
+
+    if app.discard_confirm.is_none() && !app.log_ui.inspect.open {
+        if let Some(popup) = &app.operation_popup {
             zones.push(ClickZone {
-                rect: item_area,
-                action: AppAction::ContextMenuAction(i),
+                rect: area,
+                action: AppAction::CloseOperationPopup,
+            });
+
+            let w = area.width.min(90).saturating_sub(2).max(44);
+            let h = area.height.min(14).saturating_sub(2).max(7);
+            let x = area.x + (area.width.saturating_sub(w)) / 2;
+            let y = area.y + (area.height.saturating_sub(h)) / 2;
+            let modal = Rect::new(x, y, w, h);
+
+            f.render_widget(Clear, modal);
+
+            let border = if popup.ok {
+                theme::ACCENT_SECONDARY
+            } else {
+                theme::BTN_BG
+            };
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(border))
+                .title(popup.title.as_str());
+            f.render_widget(block.clone(), modal);
+
+            let inner = modal.inner(Margin {
+                vertical: 1,
+                horizontal: 2,
+            });
+
+            let body_h = inner.height.saturating_sub(1);
+            let body_area = Rect::new(inner.x, inner.y, inner.width, body_h);
+            let buttons_y = inner.y + body_h;
+
+            let para = Paragraph::new(popup.body.as_str())
+                .wrap(Wrap { trim: false })
+                .scroll((popup.scroll_y, 0));
+            f.render_widget(para, body_area);
+
+            let label = " Close (Esc) ";
+            let bw = label.len() as u16;
+            let rect = Rect::new(inner.x, buttons_y, bw, 1);
+            let style = Style::default()
+                .bg(theme::BTN_BG)
+                .fg(theme::BTN_FG)
+                .add_modifier(Modifier::BOLD);
+            f.render_widget(Paragraph::new(label).style(style), rect);
+            zones.push(ClickZone {
+                rect,
+                action: AppAction::CloseOperationPopup,
             });
         }
     }
@@ -3522,7 +5329,8 @@ fn main() -> io::Result<()> {
     let start_path = env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| env::current_dir().unwrap());
+        .or_else(|| env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("/"));
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -3561,249 +5369,481 @@ fn main() -> io::Result<()> {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') => app.should_quit = true,
-                    KeyCode::Char('1') => app.current_tab = Tab::Explorer,
-                    KeyCode::Char('2') => {
+                    KeyCode::Char('1') if app.operation_popup.is_none() => {
+                        app.current_tab = Tab::Explorer;
+                    }
+                    KeyCode::Char('2') if app.operation_popup.is_none() => {
                         app.current_tab = Tab::Git;
                         app.git.refresh(&app.current_path);
                         app.update_git_operation();
                     }
-                    KeyCode::Char('3') => app.current_tab = Tab::Log,
+                    KeyCode::Char('3') if app.operation_popup.is_none() => {
+                        app.current_tab = Tab::Log;
+                        app.refresh_log_data();
+                    }
                     KeyCode::Esc => {
                         app.context_menu = None;
                         app.discard_confirm = None;
+                        app.operation_popup = None;
+                        app.log_ui.inspect.close();
                         if app.branch_ui.open {
-                            app.close_branch_picker();
+                            if app.branch_ui.confirm_checkout.is_some() {
+                                app.branch_ui.confirm_checkout = None;
+                            } else {
+                                app.close_branch_picker();
+                            }
                         }
                         if app.current_tab == Tab::Git {
                             app.commit.open = false;
                         }
                     }
-                    _ => match app.current_tab {
-                        Tab::Explorer => match key.code {
-                            KeyCode::Char('h') | KeyCode::Backspace | KeyCode::Left => {
-                                app.go_parent()
-                            }
-                            KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => {
-                                app.enter_selected()
-                            }
-                            KeyCode::Char('j') | KeyCode::Down => {
-                                let i = app.selected_index().unwrap_or(0);
-                                if i + 1 < app.files.len() {
-                                    app.list_state.select(Some(i + 1));
-                                    app.update_preview();
-                                    app.preview_scroll = 0;
+                    _ => {
+                        if let Some(popup) = &mut app.operation_popup {
+                            match key.code {
+                                KeyCode::Esc | KeyCode::Enter => app.operation_popup = None,
+                                KeyCode::Char('j') | KeyCode::Down => {
+                                    popup.scroll_y = popup.scroll_y.saturating_add(3)
                                 }
-                            }
-                            KeyCode::Char('k') | KeyCode::Up => {
-                                let i = app.selected_index().unwrap_or(0);
-                                if i > 0 {
-                                    app.list_state.select(Some(i - 1));
-                                    app.update_preview();
-                                    app.preview_scroll = 0;
+                                KeyCode::Char('k') | KeyCode::Up => {
+                                    popup.scroll_y = popup.scroll_y.saturating_sub(3)
                                 }
+                                _ => {}
                             }
-                            KeyCode::Char('.') => {
-                                app.show_hidden = !app.show_hidden;
-                                app.load_files();
-                            }
-                            KeyCode::Char('g') => {
-                                app.list_state.select(Some(0));
-                                app.update_preview();
-                                app.preview_scroll = 0;
-                            }
-                            KeyCode::Char('G') => {
-                                if !app.files.is_empty() {
-                                    app.list_state.select(Some(app.files.len() - 1));
-                                    app.update_preview();
-                                    app.preview_scroll = 0;
-                                }
-                            }
-                            _ => {}
-                        },
-                        Tab::Git => {
-                            if app.discard_confirm.is_some() {
-                                match key.code {
-                                    KeyCode::Char('y') | KeyCode::Char('Y') => {
-                                        app.confirm_discard()
+                        } else {
+                            match app.current_tab {
+                                Tab::Explorer => match key.code {
+                                    KeyCode::Char('h') | KeyCode::Backspace | KeyCode::Left => {
+                                        app.go_parent()
                                     }
-                                    KeyCode::Char('n') | KeyCode::Char('N') => {
-                                        app.discard_confirm = None;
-                                    }
-                                    _ => {}
-                                }
-                            } else if app.branch_ui.open {
-                                if app.branch_ui.confirm_checkout.is_some() {
-                                    match key.code {
-                                        KeyCode::Enter => app.branch_checkout_selected(true),
-                                        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                                            app.branch_ui.confirm_checkout = None;
-                                        }
-                                        _ => {}
-                                    }
-                                } else {
-                                    match key.code {
-                                        KeyCode::Esc => app.close_branch_picker(),
-                                        KeyCode::Enter => app.branch_checkout_selected(false),
-                                        KeyCode::Char('j') | KeyCode::Down => {
-                                            app.branch_ui.move_selection(1)
-                                        }
-                                        KeyCode::Char('k') | KeyCode::Up => {
-                                            app.branch_ui.move_selection(-1)
-                                        }
-                                        KeyCode::Backspace => {
-                                            app.branch_ui.query.pop();
-                                            app.branch_ui.update_filtered();
-                                        }
-                                        KeyCode::Char(ch)
-                                            if !key.modifiers.contains(KeyModifiers::CONTROL)
-                                                && !key.modifiers.contains(KeyModifiers::ALT) =>
-                                        {
-                                            app.branch_ui.query.push(ch);
-                                            app.branch_ui.update_filtered();
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            } else if app.commit.open {
-                                if key.modifiers.contains(KeyModifiers::CONTROL)
-                                    && matches!(key.code, KeyCode::Char('g') | KeyCode::Char('G'))
-                                {
-                                    app.start_ai_generate();
-                                } else if key.modifiers.contains(KeyModifiers::CONTROL)
-                                    && key.code == KeyCode::Enter
-                                {
-                                    app.handle_git_footer(GitFooterAction::Commit);
-                                } else if !app.commit.busy {
-                                    match key.code {
-                                        KeyCode::Left => app.commit.move_left(),
-                                        KeyCode::Right => app.commit.move_right(),
-                                        KeyCode::Home => app.commit.move_home(),
-                                        KeyCode::End => app.commit.move_end(),
-                                        KeyCode::Backspace => app.commit.backspace(),
-                                        KeyCode::Delete => app.commit.delete(),
-                                        KeyCode::Enter => app.commit.insert_char('\n'),
-                                        KeyCode::Char(ch)
-                                            if !key.modifiers.contains(KeyModifiers::CONTROL)
-                                                && !key.modifiers.contains(KeyModifiers::ALT) =>
-                                        {
-                                            app.commit.insert_char(ch);
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            } else {
-                                match key.code {
-                                    KeyCode::Char(' ') => app.toggle_stage_for_selection(),
-                                    KeyCode::Char('A') => app.stage_all_visible(),
-                                    KeyCode::Char('U') => app.unstage_all_visible(),
-                                    KeyCode::Char('a')
-                                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                                    {
-                                        app.select_all_git_filtered();
-                                    }
-                                    KeyCode::Char('r') => app.refresh_git_state(),
-                                    KeyCode::Char('B') => app.open_branch_picker(),
-                                    KeyCode::Char('c') => {
-                                        app.commit.open = true;
-                                        app.commit.focus = CommitFocus::Message;
-                                    }
-                                    KeyCode::Char('n')
-                                        if app
-                                            .git
-                                            .selected_entry()
-                                            .is_some_and(|e| e.is_conflict) =>
-                                    {
-                                        app.change_conflict_block(1)
-                                    }
-                                    KeyCode::Char('p')
-                                        if app
-                                            .git
-                                            .selected_entry()
-                                            .is_some_and(|e| e.is_conflict) =>
-                                    {
-                                        app.change_conflict_block(-1)
-                                    }
-                                    KeyCode::Char('o')
-                                        if app
-                                            .git
-                                            .selected_entry()
-                                            .is_some_and(|e| e.is_conflict) =>
-                                    {
-                                        app.apply_conflict_resolution(ConflictResolution::Ours)
-                                    }
-                                    KeyCode::Char('t')
-                                        if app
-                                            .git
-                                            .selected_entry()
-                                            .is_some_and(|e| e.is_conflict) =>
-                                    {
-                                        app.apply_conflict_resolution(ConflictResolution::Theirs)
-                                    }
-                                    KeyCode::Char('b')
-                                        if app
-                                            .git
-                                            .selected_entry()
-                                            .is_some_and(|e| e.is_conflict) =>
-                                    {
-                                        app.apply_conflict_resolution(ConflictResolution::Both)
-                                    }
-                                    KeyCode::Char('a')
-                                        if app
-                                            .git
-                                            .selected_entry()
-                                            .is_some_and(|e| e.is_conflict) =>
-                                    {
-                                        app.mark_conflict_resolved()
-                                    }
-                                    KeyCode::Char('s') => {
-                                        app.git.diff_mode = GitDiffMode::SideBySide
-                                    }
-                                    KeyCode::Char('u') => app.git.diff_mode = GitDiffMode::Unified,
-                                    KeyCode::Left => {
-                                        app.git.diff_scroll_x =
-                                            app.git.diff_scroll_x.saturating_sub(4);
-                                    }
-                                    KeyCode::Right => {
-                                        app.git.diff_scroll_x =
-                                            app.git.diff_scroll_x.saturating_add(4);
+                                    KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => {
+                                        app.enter_selected()
                                     }
                                     KeyCode::Char('j') | KeyCode::Down => {
-                                        let i = app.git.list_state.selected().unwrap_or(0);
-                                        if i + 1 < app.git.filtered.len() {
-                                            app.git.select_filtered(i + 1, &app.current_path);
+                                        let i = app.selected_index().unwrap_or(0);
+                                        if i + 1 < app.files.len() {
+                                            app.list_state.select(Some(i + 1));
+                                            app.update_preview();
+                                            app.preview_scroll = 0;
                                         }
                                     }
                                     KeyCode::Char('k') | KeyCode::Up => {
-                                        let i = app.git.list_state.selected().unwrap_or(0);
+                                        let i = app.selected_index().unwrap_or(0);
                                         if i > 0 {
-                                            app.git.select_filtered(i - 1, &app.current_path);
+                                            app.list_state.select(Some(i - 1));
+                                            app.update_preview();
+                                            app.preview_scroll = 0;
                                         }
+                                    }
+                                    KeyCode::Char('.') => {
+                                        app.show_hidden = !app.show_hidden;
+                                        app.load_files();
                                     }
                                     KeyCode::Char('g') => {
-                                        if !app.git.filtered.is_empty() {
-                                            app.git.select_filtered(0, &app.current_path);
-                                        }
+                                        app.list_state.select(Some(0));
+                                        app.update_preview();
+                                        app.preview_scroll = 0;
                                     }
                                     KeyCode::Char('G') => {
-                                        if !app.git.filtered.is_empty() {
-                                            app.git.select_filtered(
-                                                app.git.filtered.len() - 1,
-                                                &app.current_path,
-                                            );
+                                        if !app.files.is_empty() {
+                                            app.list_state.select(Some(app.files.len() - 1));
+                                            app.update_preview();
+                                            app.preview_scroll = 0;
                                         }
                                     }
+                                    KeyCode::Char('i') => app.add_selected_to_gitignore(),
+                                    KeyCode::Char('H') => {
+                                        app.syntax_highlight = !app.syntax_highlight;
+                                        app.set_status(if app.syntax_highlight {
+                                            "Syntax highlight: on"
+                                        } else {
+                                            "Syntax highlight: off"
+                                        });
+                                    }
                                     _ => {}
+                                },
+                                Tab::Git => {
+                                    if app.discard_confirm.is_some() {
+                                        match key.code {
+                                            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                                app.confirm_discard()
+                                            }
+                                            KeyCode::Char('n') | KeyCode::Char('N') => {
+                                                app.discard_confirm = None;
+                                            }
+                                            _ => {}
+                                        }
+                                    } else if app.branch_ui.open {
+                                        if app.branch_ui.confirm_checkout.is_some() {
+                                            match key.code {
+                                                KeyCode::Enter => {
+                                                    app.branch_checkout_selected(true)
+                                                }
+                                                KeyCode::Esc
+                                                | KeyCode::Char('n')
+                                                | KeyCode::Char('N') => {
+                                                    app.branch_ui.confirm_checkout = None;
+                                                }
+                                                _ => {}
+                                            }
+                                        } else {
+                                            match key.code {
+                                                KeyCode::Esc => app.close_branch_picker(),
+                                                KeyCode::Enter => {
+                                                    app.branch_checkout_selected(false)
+                                                }
+                                                KeyCode::Char('j') | KeyCode::Down => {
+                                                    app.branch_ui.move_selection(1)
+                                                }
+                                                KeyCode::Char('k') | KeyCode::Up => {
+                                                    app.branch_ui.move_selection(-1)
+                                                }
+                                                KeyCode::Backspace => {
+                                                    app.branch_ui.query.pop();
+                                                    app.branch_ui.update_filtered();
+                                                }
+                                                KeyCode::Char(ch)
+                                                    if !key
+                                                        .modifiers
+                                                        .contains(KeyModifiers::CONTROL)
+                                                        && !key
+                                                            .modifiers
+                                                            .contains(KeyModifiers::ALT) =>
+                                                {
+                                                    app.branch_ui.query.push(ch);
+                                                    app.branch_ui.update_filtered();
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    } else if app.commit.open {
+                                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                                            && matches!(
+                                                key.code,
+                                                KeyCode::Char('g') | KeyCode::Char('G')
+                                            )
+                                        {
+                                            app.start_ai_generate();
+                                        } else if key.modifiers.contains(KeyModifiers::CONTROL)
+                                            && key.code == KeyCode::Enter
+                                        {
+                                            app.handle_git_footer(GitFooterAction::Commit);
+                                        } else if !app.commit.busy {
+                                            match key.code {
+                                                KeyCode::Left => app.commit.move_left(),
+                                                KeyCode::Right => app.commit.move_right(),
+                                                KeyCode::Home => app.commit.move_home(),
+                                                KeyCode::End => app.commit.move_end(),
+                                                KeyCode::Backspace => app.commit.backspace(),
+                                                KeyCode::Delete => app.commit.delete(),
+                                                KeyCode::Enter => app.commit.insert_char('\n'),
+                                                KeyCode::Char(ch)
+                                                    if !key
+                                                        .modifiers
+                                                        .contains(KeyModifiers::CONTROL)
+                                                        && !key
+                                                            .modifiers
+                                                            .contains(KeyModifiers::ALT) =>
+                                                {
+                                                    app.commit.insert_char(ch);
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    } else {
+                                        match key.code {
+                                            KeyCode::Char(' ') => app.toggle_stage_for_selection(),
+                                            KeyCode::Char('A') => app.stage_all_visible(),
+                                            KeyCode::Char('U') => app.unstage_all_visible(),
+                                            KeyCode::Char('a')
+                                                if key
+                                                    .modifiers
+                                                    .contains(KeyModifiers::CONTROL) =>
+                                            {
+                                                app.select_all_git_filtered();
+                                            }
+                                            KeyCode::Char('r') => app.refresh_git_state(),
+                                            KeyCode::Char('i') => app.add_selected_to_gitignore(),
+                                            KeyCode::Char('w') => {
+                                                app.wrap_diff = !app.wrap_diff;
+                                                app.set_status(if app.wrap_diff {
+                                                    "Diff wrap: on (unified only)"
+                                                } else {
+                                                    "Diff wrap: off"
+                                                });
+                                            }
+                                            KeyCode::Char('H') => {
+                                                app.syntax_highlight = !app.syntax_highlight;
+                                                app.set_status(if app.syntax_highlight {
+                                                    "Syntax highlight: on"
+                                                } else {
+                                                    "Syntax highlight: off"
+                                                });
+                                            }
+                                            KeyCode::Char('B') => app.open_branch_picker(),
+                                            KeyCode::Char('c') => {
+                                                app.commit.open = true;
+                                                app.commit.focus = CommitFocus::Message;
+                                            }
+                                            KeyCode::Char('n')
+                                                if app
+                                                    .git
+                                                    .selected_entry()
+                                                    .is_some_and(|e| e.is_conflict) =>
+                                            {
+                                                app.change_conflict_block(1)
+                                            }
+                                            KeyCode::Char('p')
+                                                if app
+                                                    .git
+                                                    .selected_entry()
+                                                    .is_some_and(|e| e.is_conflict) =>
+                                            {
+                                                app.change_conflict_block(-1)
+                                            }
+                                            KeyCode::Char('o')
+                                                if app
+                                                    .git
+                                                    .selected_entry()
+                                                    .is_some_and(|e| e.is_conflict) =>
+                                            {
+                                                app.apply_conflict_resolution(
+                                                    ConflictResolution::Ours,
+                                                )
+                                            }
+                                            KeyCode::Char('t')
+                                                if app
+                                                    .git
+                                                    .selected_entry()
+                                                    .is_some_and(|e| e.is_conflict) =>
+                                            {
+                                                app.apply_conflict_resolution(
+                                                    ConflictResolution::Theirs,
+                                                )
+                                            }
+                                            KeyCode::Char('b')
+                                                if app
+                                                    .git
+                                                    .selected_entry()
+                                                    .is_some_and(|e| e.is_conflict) =>
+                                            {
+                                                app.apply_conflict_resolution(
+                                                    ConflictResolution::Both,
+                                                )
+                                            }
+                                            KeyCode::Char('a')
+                                                if app
+                                                    .git
+                                                    .selected_entry()
+                                                    .is_some_and(|e| e.is_conflict) =>
+                                            {
+                                                app.mark_conflict_resolved()
+                                            }
+                                            KeyCode::Char('s') => {
+                                                app.git.diff_mode = match app.git.diff_mode {
+                                                    GitDiffMode::Unified => GitDiffMode::SideBySide,
+                                                    GitDiffMode::SideBySide => GitDiffMode::Unified,
+                                                };
+                                            }
+
+                                            KeyCode::Left => {
+                                                app.git.diff_scroll_x =
+                                                    app.git.diff_scroll_x.saturating_sub(4);
+                                            }
+                                            KeyCode::Right => {
+                                                app.git.diff_scroll_x =
+                                                    app.git.diff_scroll_x.saturating_add(4);
+                                            }
+                                            KeyCode::Char('j') | KeyCode::Down => {
+                                                let i = app.git.list_state.selected().unwrap_or(0);
+                                                if i + 1 < app.git.filtered.len() {
+                                                    app.git
+                                                        .select_filtered(i + 1, &app.current_path);
+                                                }
+                                            }
+                                            KeyCode::Char('k') | KeyCode::Up => {
+                                                let i = app.git.list_state.selected().unwrap_or(0);
+                                                if i > 0 {
+                                                    app.git
+                                                        .select_filtered(i - 1, &app.current_path);
+                                                }
+                                            }
+                                            KeyCode::Char('g') => {
+                                                if !app.git.filtered.is_empty() {
+                                                    app.git.select_filtered(0, &app.current_path);
+                                                }
+                                            }
+                                            KeyCode::Char('G') => {
+                                                if !app.git.filtered.is_empty() {
+                                                    app.git.select_filtered(
+                                                        app.git.filtered.len() - 1,
+                                                        &app.current_path,
+                                                    );
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                Tab::Log => {
+                                    if app.log_ui.inspect.open {
+                                        match key.code {
+                                            KeyCode::Esc | KeyCode::Enter => {
+                                                app.log_ui.inspect.close()
+                                            }
+                                            KeyCode::Char('j') | KeyCode::Down => {
+                                                app.log_ui.inspect.scroll_y =
+                                                    app.log_ui.inspect.scroll_y.saturating_add(3)
+                                            }
+                                            KeyCode::Char('k') | KeyCode::Up => {
+                                                app.log_ui.inspect.scroll_y =
+                                                    app.log_ui.inspect.scroll_y.saturating_sub(3)
+                                            }
+                                            KeyCode::Char('y') => {
+                                                if let Some(s) = app
+                                                    .selected_log_hash()
+                                                    .or_else(|| app.selected_log_command())
+                                                {
+                                                    app.request_copy_to_clipboard(s);
+                                                }
+                                            }
+                                            KeyCode::Char('Y') => {
+                                                if let Some(s) = app.selected_log_subject() {
+                                                    app.request_copy_to_clipboard(s);
+                                                } else {
+                                                    app.request_copy_to_clipboard(
+                                                        app.log_ui.inspect.body.clone(),
+                                                    );
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    } else {
+                                        match key.code {
+                                            KeyCode::Char('h') => {
+                                                app.set_log_subtab(LogSubTab::History)
+                                            }
+                                            KeyCode::Char('r') => {
+                                                app.set_log_subtab(LogSubTab::Reflog)
+                                            }
+                                            KeyCode::Char('c') => {
+                                                app.set_log_subtab(LogSubTab::Commands)
+                                            }
+                                            KeyCode::Char('x')
+                                                if app.log_ui.subtab == LogSubTab::Commands =>
+                                            {
+                                                app.git_log.clear();
+                                                app.log_ui.command_state.select(None);
+                                                app.refresh_log_diff();
+                                                app.set_status("Log cleared");
+                                            }
+                                            KeyCode::Char('d')
+                                                if app.log_ui.subtab != LogSubTab::Commands =>
+                                            {
+                                                let next = match app.log_ui.detail_mode {
+                                                    LogDetailMode::Diff => LogDetailMode::Files,
+                                                    LogDetailMode::Files => LogDetailMode::Diff,
+                                                };
+                                                app.log_ui.set_detail_mode(next);
+                                                app.refresh_log_diff();
+                                            }
+                                            KeyCode::Char('f')
+                                                if app.log_ui.subtab != LogSubTab::Commands =>
+                                            {
+                                                app.log_ui.set_detail_mode(LogDetailMode::Files);
+                                                app.refresh_log_diff();
+                                            }
+                                            KeyCode::Char('i') => app.open_log_inspect(),
+                                            KeyCode::Char('z') => app.toggle_log_zoom(),
+                                            KeyCode::Tab => app.cycle_log_focus(),
+                                            KeyCode::Char('[') => app.adjust_log_left_width(-2),
+                                            KeyCode::Char(']') => app.adjust_log_left_width(2),
+                                            KeyCode::Char('s') => {
+                                                app.log_ui.diff_mode = match app.log_ui.diff_mode {
+                                                    GitDiffMode::Unified => GitDiffMode::SideBySide,
+                                                    GitDiffMode::SideBySide => GitDiffMode::Unified,
+                                                };
+                                                app.log_ui.focus = LogPaneFocus::Diff;
+                                            }
+
+                                            KeyCode::Char('w') => {
+                                                app.wrap_diff = !app.wrap_diff;
+                                                app.set_status(if app.wrap_diff {
+                                                    "Diff wrap: on (unified only)"
+                                                } else {
+                                                    "Diff wrap: off"
+                                                });
+                                            }
+                                            KeyCode::Char('H') => {
+                                                app.syntax_highlight = !app.syntax_highlight;
+                                                app.set_status(if app.syntax_highlight {
+                                                    "Syntax highlight: on"
+                                                } else {
+                                                    "Syntax highlight: off"
+                                                });
+                                            }
+                                            KeyCode::Left => {
+                                                app.log_ui.diff_scroll_x =
+                                                    app.log_ui.diff_scroll_x.saturating_sub(4)
+                                            }
+                                            KeyCode::Right => {
+                                                app.log_ui.diff_scroll_x =
+                                                    app.log_ui.diff_scroll_x.saturating_add(4)
+                                            }
+                                            KeyCode::Char('j') | KeyCode::Down => match app
+                                                .log_ui
+                                                .focus
+                                            {
+                                                LogPaneFocus::Commits => app.move_log_selection(1),
+                                                LogPaneFocus::Files => {
+                                                    app.move_log_file_selection(1)
+                                                }
+                                                LogPaneFocus::Diff => {
+                                                    app.log_ui.diff_scroll_y =
+                                                        app.log_ui.diff_scroll_y.saturating_add(1)
+                                                }
+                                            },
+                                            KeyCode::Char('k') | KeyCode::Up => match app
+                                                .log_ui
+                                                .focus
+                                            {
+                                                LogPaneFocus::Commits => app.move_log_selection(-1),
+                                                LogPaneFocus::Files => {
+                                                    app.move_log_file_selection(-1)
+                                                }
+                                                LogPaneFocus::Diff => {
+                                                    app.log_ui.diff_scroll_y =
+                                                        app.log_ui.diff_scroll_y.saturating_sub(1)
+                                                }
+                                            },
+                                            KeyCode::Char('g') => match app.log_ui.focus {
+                                                LogPaneFocus::Commits => app.select_log_item(0),
+                                                LogPaneFocus::Files => app.select_log_file(0),
+                                                LogPaneFocus::Diff => app.log_ui.diff_scroll_y = 0,
+                                            },
+                                            KeyCode::Char('G') => match app.log_ui.focus {
+                                                LogPaneFocus::Commits => {
+                                                    let n = app.active_log_len();
+                                                    if n > 0 {
+                                                        app.select_log_item(n - 1);
+                                                    }
+                                                }
+                                                LogPaneFocus::Files => {
+                                                    let n = app.log_ui.files.len();
+                                                    if n > 0 {
+                                                        app.select_log_file(n - 1);
+                                                    }
+                                                }
+                                                LogPaneFocus::Diff => {
+                                                    app.log_ui.diff_scroll_y = u16::MAX
+                                                }
+                                            },
+                                            _ => {}
+                                        }
+                                    }
                                 }
                             }
                         }
-                        Tab::Log => match key.code {
-                            KeyCode::Char('c') => {
-                                app.git_log.clear();
-                                app.set_status("Log cleared");
-                            }
-                            _ => {}
-                        },
-                    },
+                    }
                 },
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::Moved => {
@@ -3827,7 +5867,9 @@ fn main() -> io::Result<()> {
                             }
                         }
                         Tab::Git => {
-                            if mouse.column >= app.git_diff_x {
+                            if app.branch_ui.open {
+                                app.branch_ui.move_selection(3);
+                            } else if mouse.column >= app.git_diff_x {
                                 if mouse.modifiers.contains(KeyModifiers::SHIFT) {
                                     app.git.diff_scroll_x = app.git.diff_scroll_x.saturating_add(4);
                                 } else if app.git.selected_entry().is_some_and(|e| e.is_conflict) {
@@ -3846,7 +5888,31 @@ fn main() -> io::Result<()> {
                                 }
                             }
                         }
-                        Tab::Log => {}
+                        Tab::Log => {
+                            let files_mode = app.log_ui.detail_mode == LogDetailMode::Files
+                                && app.log_ui.subtab != LogSubTab::Commands
+                                && app.log_ui.zoom != LogZoom::List;
+
+                            if app.log_ui.inspect.open {
+                                app.log_ui.inspect.scroll_y =
+                                    app.log_ui.inspect.scroll_y.saturating_add(3);
+                            } else if mouse.column >= app.log_diff_x {
+                                app.log_ui.focus = LogPaneFocus::Diff;
+                                if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.log_ui.diff_scroll_x =
+                                        app.log_ui.diff_scroll_x.saturating_add(4);
+                                } else {
+                                    app.log_ui.diff_scroll_y =
+                                        app.log_ui.diff_scroll_y.saturating_add(3);
+                                }
+                            } else if files_mode && mouse.column >= app.log_files_x {
+                                app.log_ui.focus = LogPaneFocus::Files;
+                                app.move_log_file_selection(3);
+                            } else {
+                                app.log_ui.focus = LogPaneFocus::Commits;
+                                app.move_log_selection(3);
+                            }
+                        }
                     },
                     MouseEventKind::ScrollUp => match app.current_tab {
                         Tab::Explorer => {
@@ -3865,7 +5931,9 @@ fn main() -> io::Result<()> {
                             }
                         }
                         Tab::Git => {
-                            if mouse.column >= app.git_diff_x {
+                            if app.branch_ui.open {
+                                app.branch_ui.move_selection(-3);
+                            } else if mouse.column >= app.git_diff_x {
                                 if mouse.modifiers.contains(KeyModifiers::SHIFT) {
                                     app.git.diff_scroll_x = app.git.diff_scroll_x.saturating_sub(4);
                                 } else if app.git.selected_entry().is_some_and(|e| e.is_conflict) {
@@ -3883,7 +5951,31 @@ fn main() -> io::Result<()> {
                                 }
                             }
                         }
-                        Tab::Log => {}
+                        Tab::Log => {
+                            let files_mode = app.log_ui.detail_mode == LogDetailMode::Files
+                                && app.log_ui.subtab != LogSubTab::Commands
+                                && app.log_ui.zoom != LogZoom::List;
+
+                            if app.log_ui.inspect.open {
+                                app.log_ui.inspect.scroll_y =
+                                    app.log_ui.inspect.scroll_y.saturating_sub(3);
+                            } else if mouse.column >= app.log_diff_x {
+                                app.log_ui.focus = LogPaneFocus::Diff;
+                                if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.log_ui.diff_scroll_x =
+                                        app.log_ui.diff_scroll_x.saturating_sub(4);
+                                } else {
+                                    app.log_ui.diff_scroll_y =
+                                        app.log_ui.diff_scroll_y.saturating_sub(3);
+                                }
+                            } else if files_mode && mouse.column >= app.log_files_x {
+                                app.log_ui.focus = LogPaneFocus::Files;
+                                app.move_log_file_selection(-3);
+                            } else {
+                                app.log_ui.focus = LogPaneFocus::Commits;
+                                app.move_log_selection(-3);
+                            }
+                        }
                     },
                     MouseEventKind::Down(MouseButton::Left) => {
                         app.handle_click(mouse.row, mouse.column, mouse.modifiers);
@@ -3938,6 +6030,7 @@ fn main() -> io::Result<()> {
     }
 
     app.save_persisted_bookmarks();
+    app.save_persisted_ui_settings();
 
     disable_raw_mode()?;
     execute!(

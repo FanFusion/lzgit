@@ -26,6 +26,8 @@ serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
 ureq = { version = "2.12.1", features = ["json"] }
 
+syntect = { version = "5.2.0", default-features = false, features = ["default-themes", "default-syntaxes", "parsing", "regex-fancy"] }
+
 [profile.release]
 lto = true
 codegen-units = 1

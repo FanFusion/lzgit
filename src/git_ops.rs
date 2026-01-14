@@ -2,6 +2,29 @@ use std::{fs, io, path::Path, process::Command};
 
 use crate::branch::BranchEntry;
 
+#[derive(Clone, Debug)]
+pub struct CommitEntry {
+    pub hash: String,
+    pub short: String,
+    pub date: String,
+    pub author: String,
+    pub subject: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReflogEntry {
+    pub hash: String,
+    pub selector: String,
+    pub subject: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CommitFileChange {
+    pub status: String,
+    pub path: String,
+    pub old_path: Option<String>,
+}
+
 fn run_git(cwd: &Path, args: &[&str]) -> io::Result<std::process::Output> {
     Command::new("git")
         .arg("-C")
@@ -33,6 +56,273 @@ pub fn staged_diff(repo_root: &Path) -> Result<String, String> {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+pub fn list_history(repo_root: &Path, max: usize) -> Result<Vec<CommitEntry>, String> {
+    let max_s = max.to_string();
+    let out = run_git(
+        repo_root,
+        &[
+            "log",
+            "--date=short",
+            "--max-count",
+            max_s.as_str(),
+            "--pretty=format:%H\t%h\t%ad\t%an\t%s",
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    let mut entries = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut it = line.splitn(5, '\t');
+        let hash = it.next().unwrap_or("").trim().to_string();
+        let short = it.next().unwrap_or("").trim().to_string();
+        let date = it.next().unwrap_or("").trim().to_string();
+        let author = it.next().unwrap_or("").trim().to_string();
+        let subject = it.next().unwrap_or("").trim().to_string();
+        if hash.is_empty() {
+            continue;
+        }
+        entries.push(CommitEntry {
+            hash,
+            short,
+            date,
+            author,
+            subject,
+        });
+    }
+
+    Ok(entries)
+}
+
+pub fn list_reflog(repo_root: &Path, max: usize) -> Result<Vec<ReflogEntry>, String> {
+    let max_s = max.to_string();
+    let out = run_git(
+        repo_root,
+        &[
+            "log",
+            "-g",
+            "--date=relative",
+            "--max-count",
+            max_s.as_str(),
+            "--pretty=format:%H\t%gD\t%gs",
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    let mut entries = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut it = line.splitn(3, '\t');
+        let hash = it.next().unwrap_or("").trim().to_string();
+        let selector = it.next().unwrap_or("").trim().to_string();
+        let subject = it.next().unwrap_or("").trim().to_string();
+        if hash.is_empty() {
+            continue;
+        }
+        entries.push(ReflogEntry {
+            hash,
+            selector,
+            subject,
+        });
+    }
+
+    Ok(entries)
+}
+
+pub fn show_commit(repo_root: &Path, hash: &str) -> Result<String, String> {
+    let out = run_git(
+        repo_root,
+        &[
+            "show",
+            "--no-color",
+            "--format=fuller",
+            "--stat",
+            "--patch",
+            hash,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn commit_parents(repo_root: &Path, hash: &str) -> Result<Vec<String>, String> {
+    let out = run_git(repo_root, &["rev-list", "--parents", "-n", "1", hash])
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let line = text.lines().next().unwrap_or("");
+    Ok(line
+        .split_whitespace()
+        .skip(1)
+        .map(|s| s.to_string())
+        .collect())
+}
+
+fn parse_name_status(text: &str) -> Vec<CommitFileChange> {
+    let mut files = Vec::new();
+
+    for line in text.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = t.split('\t').collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        let status = parts[0].trim().to_string();
+        if status.starts_with('R') || status.starts_with('C') {
+            let old_path = parts.get(1).map(|s| s.to_string());
+            let path = parts.get(2).map(|s| s.to_string()).unwrap_or_default();
+            if path.is_empty() {
+                continue;
+            }
+            files.push(CommitFileChange {
+                status,
+                path,
+                old_path,
+            });
+        } else {
+            let path = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+            if path.is_empty() {
+                continue;
+            }
+            files.push(CommitFileChange {
+                status,
+                path,
+                old_path: None,
+            });
+        }
+    }
+
+    files
+}
+
+pub fn list_commit_files(repo_root: &Path, hash: &str) -> Result<Vec<CommitFileChange>, String> {
+    let parents = commit_parents(repo_root, hash)?;
+    if let Some(first_parent) = parents.first() {
+        let out = run_git(
+            repo_root,
+            &["diff", "--no-color", "--name-status", first_parent, hash],
+        )
+        .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        return Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)));
+    }
+
+    let out = run_git(
+        repo_root,
+        &[
+            "show",
+            "--no-color",
+            "--format=",
+            "--name-status",
+            "--no-patch",
+            hash,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)))
+}
+
+pub fn show_commit_file_diff(repo_root: &Path, hash: &str, path: &str) -> Result<String, String> {
+    let parents = commit_parents(repo_root, hash)?;
+    if let Some(first_parent) = parents.first() {
+        let out = run_git(
+            repo_root,
+            &["diff", "--no-color", first_parent, hash, "--", path],
+        )
+        .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+    }
+
+    let hash_s = hash.to_string();
+    let path_s = path.to_string();
+
+    let args = [
+        "show".to_string(),
+        "--no-color".to_string(),
+        "--format=".to_string(),
+        "--patch".to_string(),
+        hash_s,
+        "--".to_string(),
+        path_s,
+    ];
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let out = run_git(repo_root, &refs).map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+pub fn add_to_gitignore(repo_root: &Path, patterns: &[String]) -> Result<usize, String> {
+    if patterns.is_empty() {
+        return Ok(0);
+    }
+
+    let path = repo_root.join(".gitignore");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+
+    let mut set = std::collections::BTreeSet::new();
+    for line in existing.lines() {
+        let t = line.trim_end();
+        if !t.is_empty() {
+            set.insert(t.to_string());
+        }
+    }
+
+    let mut to_add: Vec<String> = Vec::new();
+    for p in patterns {
+        let t = p.trim();
+        if t.is_empty() || t == ".gitignore" {
+            continue;
+        }
+        if !set.contains(t) {
+            to_add.push(t.to_string());
+            set.insert(t.to_string());
+        }
+    }
+
+    if to_add.is_empty() {
+        return Ok(0);
+    }
+
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for p in &to_add {
+        out.push_str(p);
+        out.push('\n');
+    }
+
+    fs::write(&path, out).map_err(|e| e.to_string())?;
+    Ok(to_add.len())
 }
 
 pub fn stage_path(repo_root: &Path, path: &str) -> Result<(), String> {
@@ -195,25 +485,46 @@ pub fn rebase_skip(repo_root: &Path) -> Result<(), String> {
     }
 }
 
-pub fn list_local_branches(repo_root: &Path) -> Result<Vec<BranchEntry>, String> {
-    let out = run_git(
+pub fn list_branches(repo_root: &Path) -> Result<Vec<BranchEntry>, String> {
+    let format = "%(HEAD)\t%(refname:short)\t%(upstream:short)\t%(upstream:track)";
+
+    let local_out = run_git(
         repo_root,
         &[
             "for-each-ref",
             "--sort=-committerdate",
             "refs/heads",
-            "--format=%(HEAD)\t%(refname:short)\t%(upstream:short)\t%(upstream:track)",
+            "--format",
+            format,
         ],
     )
     .map_err(|e| e.to_string())?;
-
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    if !local_out.status.success() {
+        return Err(String::from_utf8_lossy(&local_out.stderr)
+            .trim()
+            .to_string());
     }
 
-    let text = String::from_utf8_lossy(&out.stdout);
+    let remote_out = run_git(
+        repo_root,
+        &[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "refs/remotes",
+            "--format",
+            format,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if !remote_out.status.success() {
+        return Err(String::from_utf8_lossy(&remote_out.stderr)
+            .trim()
+            .to_string());
+    }
+
     let mut branches = Vec::new();
-    for line in text.lines() {
+
+    for line in String::from_utf8_lossy(&local_out.stdout).lines() {
         let mut it = line.split('\t');
         let head = it.next().unwrap_or("").trim();
         let name = it.next().unwrap_or("").trim().to_string();
@@ -231,6 +542,31 @@ pub fn list_local_branches(repo_root: &Path) -> Result<Vec<BranchEntry>, String>
         branches.push(BranchEntry {
             name,
             is_current: head == "*",
+            is_remote: false,
+            upstream,
+            track,
+        });
+    }
+
+    for line in String::from_utf8_lossy(&remote_out.stdout).lines() {
+        let mut it = line.split('\t');
+        let _head = it.next().unwrap_or("").trim();
+        let name = it.next().unwrap_or("").trim().to_string();
+        if name.is_empty() || name.ends_with("/HEAD") {
+            continue;
+        }
+        let upstream = it
+            .next()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let track = it
+            .next()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        branches.push(BranchEntry {
+            name,
+            is_current: false,
+            is_remote: true,
             upstream,
             track,
         });
@@ -249,6 +585,45 @@ pub fn is_dirty(repo_root: &Path) -> Result<bool, String> {
 
 pub fn checkout_branch(repo_root: &Path, branch: &str) -> Result<(), String> {
     let out = run_git(repo_root, &["checkout", branch]).map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+pub fn checkout_branch_entry(repo_root: &Path, branch: &BranchEntry) -> Result<(), String> {
+    if !branch.is_remote {
+        return checkout_branch(repo_root, branch.name.as_str());
+    }
+
+    let local_name = branch
+        .name
+        .split_once('/')
+        .map(|(_, rest)| rest)
+        .unwrap_or(branch.name.as_str());
+
+    let out = run_git(
+        repo_root,
+        &[
+            "checkout",
+            "--track",
+            "-b",
+            local_name,
+            branch.name.as_str(),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+pub fn checkout_detached(repo_root: &Path, hash: &str) -> Result<(), String> {
+    let out = run_git(repo_root, &["checkout", "--detach", hash]).map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(())
     } else {
