@@ -17,6 +17,13 @@ pub struct ReflogEntry {
     pub hash: String,
     pub selector: String,
     pub subject: String,
+    pub decoration: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct StashEntry {
+    pub selector: String,
+    pub subject: String,
 }
 
 #[derive(Clone, Debug)]
@@ -110,10 +117,12 @@ pub fn list_reflog(repo_root: &Path, max: usize) -> Result<Vec<ReflogEntry>, Str
         &[
             "log",
             "-g",
+            "--no-color",
+            "--decorate=short",
             "--date=relative",
             "--max-count",
             max_s.as_str(),
-            "--pretty=format:%H\t%gD\t%gs",
+            "--pretty=format:%H\t%gD\t%gs\t%d",
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -123,10 +132,11 @@ pub fn list_reflog(repo_root: &Path, max: usize) -> Result<Vec<ReflogEntry>, Str
 
     let mut entries = Vec::new();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let mut it = line.splitn(3, '\t');
+        let mut it = line.splitn(4, '\t');
         let hash = it.next().unwrap_or("").trim().to_string();
         let selector = it.next().unwrap_or("").trim().to_string();
         let subject = it.next().unwrap_or("").trim().to_string();
+        let decoration = it.next().unwrap_or("").trim().to_string();
         if hash.is_empty() {
             continue;
         }
@@ -134,10 +144,67 @@ pub fn list_reflog(repo_root: &Path, max: usize) -> Result<Vec<ReflogEntry>, Str
             hash,
             selector,
             subject,
+            decoration,
         });
     }
 
     Ok(entries)
+}
+
+pub fn list_stashes(repo_root: &Path, max: usize) -> Result<Vec<StashEntry>, String> {
+    let max_s = max.to_string();
+    let out = run_git(
+        repo_root,
+        &[
+            "stash",
+            "list",
+            "--no-color",
+            "--max-count",
+            max_s.as_str(),
+            "--pretty=format:%gd\t%gs",
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    let mut entries = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut it = line.splitn(2, '\t');
+        let selector = it.next().unwrap_or("").trim().to_string();
+        let subject = it.next().unwrap_or("").trim().to_string();
+        if selector.is_empty() {
+            continue;
+        }
+        entries.push(StashEntry { selector, subject });
+    }
+
+    Ok(entries)
+}
+
+pub fn stash_apply(repo_root: &Path, selector: &str) -> Result<(), String> {
+    let out = run_git(repo_root, &["stash", "apply", selector]).map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+pub fn stash_pop(repo_root: &Path, selector: &str) -> Result<(), String> {
+    let out = run_git(repo_root, &["stash", "pop", selector]).map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+pub fn stash_drop(repo_root: &Path, selector: &str) -> Result<(), String> {
+    let out = run_git(repo_root, &["stash", "drop", selector]).map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
 }
 
 pub fn show_commit(repo_root: &Path, hash: &str) -> Result<String, String> {
@@ -146,9 +213,29 @@ pub fn show_commit(repo_root: &Path, hash: &str) -> Result<String, String> {
         &[
             "show",
             "--no-color",
+            "--decorate=short",
             "--format=fuller",
             "--stat",
             "--patch",
+            hash,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+pub fn show_commit_header(repo_root: &Path, hash: &str) -> Result<String, String> {
+    let out = run_git(
+        repo_root,
+        &[
+            "show",
+            "--no-color",
+            "--decorate=short",
+            "--format=fuller",
+            "--no-patch",
             hash,
         ],
     )

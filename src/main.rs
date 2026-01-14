@@ -260,6 +260,16 @@ enum AppAction {
     BranchCheckout,
     ConfirmBranchCheckout,
     CancelBranchCheckout,
+
+    OpenStashPicker,
+    CloseStashPicker,
+    SelectStash(usize),
+    StashApply,
+    StashPop,
+    StashDrop,
+    ConfirmStashAction,
+    CancelStashAction,
+
     GitFetch,
     GitPullRebase,
     GitPush,
@@ -424,6 +434,11 @@ struct LogUi {
 
     left_width: u16,
 
+    filter_query: String,
+    filter_edit: bool,
+    history_filtered: Vec<usize>,
+    reflog_filtered: Vec<usize>,
+
     history: Vec<git_ops::CommitEntry>,
     reflog: Vec<git_ops::ReflogEntry>,
     files: Vec<git_ops::CommitFileChange>,
@@ -453,6 +468,11 @@ impl LogUi {
             diff_mode: GitDiffMode::Unified,
 
             left_width: 56,
+
+            filter_query: String::new(),
+            filter_edit: false,
+            history_filtered: Vec::new(),
+            reflog_filtered: Vec::new(),
 
             history: Vec::new(),
             reflog: Vec::new(),
@@ -501,7 +521,7 @@ impl LogUi {
         self.diff_scroll_x = 0;
 
         match mode {
-            LogDetailMode::Files if self.subtab != LogSubTab::Commands => {
+            LogDetailMode::Files if self.subtab == LogSubTab::History => {
                 self.focus = LogPaneFocus::Files;
             }
             LogDetailMode::Diff => {
@@ -530,6 +550,140 @@ impl LogUi {
             LogSubTab::History => &mut self.history_state,
             LogSubTab::Reflog => &mut self.reflog_state,
             LogSubTab::Commands => &mut self.command_state,
+        }
+    }
+
+    fn update_filtered(&mut self) {
+        let prev_hist = self
+            .history_state
+            .selected()
+            .and_then(|sel| self.history_filtered.get(sel).copied());
+        let prev_reflog = self
+            .reflog_state
+            .selected()
+            .and_then(|sel| self.reflog_filtered.get(sel).copied());
+
+        let parsed = parse_log_filter_query(self.filter_query.as_str());
+        let author_tokens: Vec<String> = parsed.author.iter().map(|s| s.to_lowercase()).collect();
+        let ref_tokens: Vec<String> = parsed.refs.iter().map(|s| s.to_lowercase()).collect();
+        let tokens: Vec<String> = parsed.tokens.iter().map(|s| s.to_lowercase()).collect();
+        let is_empty = author_tokens.is_empty() && ref_tokens.is_empty() && tokens.is_empty();
+
+        let mut history_matches: Vec<(i32, usize)> = Vec::new();
+        let mut reflog_matches: Vec<(i32, usize)> = Vec::new();
+
+        for (i, e) in self.history.iter().enumerate() {
+            if is_empty {
+                history_matches.push((0, i));
+                continue;
+            }
+
+            let author = e.author.to_lowercase();
+            let refs = e.decoration.to_lowercase();
+            let hay = format!("{} {} {}", e.short, e.subject, e.decoration).to_lowercase();
+
+            let mut score = 0i32;
+            let mut ok = true;
+
+            for t in &author_tokens {
+                if let Some(s) = token_score(author.as_str(), t.as_str()) {
+                    score += s;
+                } else {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                for t in &ref_tokens {
+                    if let Some(s) = token_score(refs.as_str(), t.as_str()) {
+                        score += s;
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if ok {
+                for t in &tokens {
+                    if let Some(s) = token_score(hay.as_str(), t.as_str()) {
+                        score += s;
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+
+            if ok {
+                history_matches.push((score, i));
+            }
+        }
+
+        for (i, e) in self.reflog.iter().enumerate() {
+            if is_empty {
+                reflog_matches.push((0, i));
+                continue;
+            }
+
+            let refs = e.decoration.to_lowercase();
+            let hay = format!("{} {} {}", e.selector, e.subject, e.decoration).to_lowercase();
+
+            let mut score = 0i32;
+            let mut ok = true;
+
+            for t in &ref_tokens {
+                if let Some(s) = token_score(refs.as_str(), t.as_str()) {
+                    score += s;
+                } else {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                for t in &tokens {
+                    if let Some(s) = token_score(hay.as_str(), t.as_str()) {
+                        score += s;
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+
+            if ok {
+                reflog_matches.push((score, i));
+            }
+        }
+
+        history_matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        reflog_matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+
+        self.history_filtered.clear();
+        self.history_filtered
+            .extend(history_matches.into_iter().map(|(_, i)| i));
+
+        self.reflog_filtered.clear();
+        self.reflog_filtered
+            .extend(reflog_matches.into_iter().map(|(_, i)| i));
+
+        if self.history_filtered.is_empty() {
+            self.history_state.select(None);
+        } else if let Some(prev) =
+            prev_hist.and_then(|idx| self.history_filtered.iter().position(|i| *i == idx))
+        {
+            self.history_state.select(Some(prev));
+        } else {
+            self.history_state.select(Some(0));
+        }
+
+        if self.reflog_filtered.is_empty() {
+            self.reflog_state.select(None);
+        } else if let Some(prev) =
+            prev_reflog.and_then(|idx| self.reflog_filtered.iter().position(|i| *i == idx))
+        {
+            self.reflog_state.select(Some(prev));
+        } else {
+            self.reflog_state.select(Some(0));
         }
     }
 }
@@ -577,6 +731,7 @@ enum CommandId {
     GitPullRebase,
     GitPush,
     OpenBranchPicker,
+    OpenStashPicker,
     ClearGitLog,
     Quit,
 }
@@ -588,6 +743,7 @@ const COMMAND_PALETTE_ITEMS: &[(CommandId, &str)] = &[
     (CommandId::SelectTheme, "Select theme…"),
     (CommandId::RefreshGit, "Git: refresh status"),
     (CommandId::OpenBranchPicker, "Checkout branch…"),
+    (CommandId::OpenStashPicker, "Stash…"),
     (CommandId::GitFetch, "Git: fetch --prune"),
     (CommandId::GitPullRebase, "Git: pull --rebase"),
     (CommandId::GitPush, "Git: push"),
@@ -606,6 +762,108 @@ impl CommandPaletteUi {
             open: false,
             list_state: ListState::default(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StashConfirmAction {
+    Pop,
+    Drop,
+}
+
+struct StashUi {
+    open: bool,
+    query: String,
+    stashes: Vec<git_ops::StashEntry>,
+    filtered: Vec<usize>,
+    list_state: ListState,
+    confirm: Option<(StashConfirmAction, String)>,
+    status: Option<String>,
+}
+
+impl StashUi {
+    fn new() -> Self {
+        Self {
+            open: false,
+            query: String::new(),
+            stashes: Vec::new(),
+            filtered: Vec::new(),
+            list_state: ListState::default(),
+            confirm: None,
+            status: None,
+        }
+    }
+
+    fn selected_stash(&self) -> Option<&git_ops::StashEntry> {
+        let sel = self.list_state.selected()?;
+        let idx = *self.filtered.get(sel)?;
+        self.stashes.get(idx)
+    }
+
+    fn update_filtered(&mut self) {
+        let prev = self
+            .list_state
+            .selected()
+            .and_then(|sel| self.filtered.get(sel).copied());
+
+        let query = self.query.trim().to_lowercase();
+        let tokens: Vec<String> = query
+            .split_whitespace()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let mut matches: Vec<(i32, usize)> = Vec::new();
+        for (i, s) in self.stashes.iter().enumerate() {
+            if tokens.is_empty() {
+                matches.push((0, i));
+                continue;
+            }
+
+            let hay = format!("{} {}", s.selector, s.subject).to_lowercase();
+            let mut score = 0i32;
+            let mut ok = true;
+
+            for t in &tokens {
+                if let Some(s) = token_score(hay.as_str(), t.as_str()) {
+                    score += s;
+                } else {
+                    ok = false;
+                    break;
+                }
+            }
+
+            if ok {
+                matches.push((score, i));
+            }
+        }
+
+        matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        self.filtered.clear();
+        self.filtered.extend(matches.into_iter().map(|(_, i)| i));
+
+        if self.filtered.is_empty() {
+            self.list_state.select(None);
+            return;
+        }
+
+        if let Some(prev) = prev.and_then(|idx| self.filtered.iter().position(|i| *i == idx)) {
+            self.list_state.select(Some(prev));
+        } else {
+            self.list_state.select(Some(0));
+        }
+    }
+
+    fn move_selection(&mut self, delta: i32) {
+        let len = self.filtered.len();
+        if len == 0 {
+            self.list_state.select(None);
+            return;
+        }
+
+        let cur = self.list_state.selected().unwrap_or(0) as i32;
+        let next = (cur + delta).clamp(0, len.saturating_sub(1) as i32);
+        self.list_state.select(Some(next as usize));
     }
 }
 
@@ -663,6 +921,7 @@ struct App {
     git: GitState,
     git_operation: Option<GitOperation>,
     branch_ui: BranchUi,
+    stash_ui: StashUi,
     conflict_ui: ConflictUi,
     commit: CommitState,
     pending_job: Option<PendingJob>,
@@ -718,6 +977,7 @@ impl App {
             git: GitState::new(),
             git_operation: None,
             branch_ui: BranchUi::new(),
+            stash_ui: StashUi::new(),
             conflict_ui: ConflictUi::new(),
             commit: CommitState::new(),
             pending_job: None,
@@ -829,6 +1089,100 @@ impl App {
         self.branch_ui.list_state.select(None);
     }
 
+    fn open_stash_picker(&mut self) {
+        self.context_menu = None;
+        self.commit.open = false;
+        self.branch_ui.open = false;
+
+        let Some(repo_root) = self.git.repo_root.clone() else {
+            self.set_status("Not a git repository");
+            return;
+        };
+
+        match git_ops::list_stashes(&repo_root, 200) {
+            Ok(stashes) => {
+                self.stash_ui.open = true;
+                self.stash_ui.query.clear();
+                self.stash_ui.status = None;
+                self.stash_ui.confirm = None;
+                self.stash_ui.stashes = stashes;
+                self.stash_ui.update_filtered();
+            }
+            Err(e) => {
+                self.set_status(e);
+            }
+        }
+    }
+
+    fn close_stash_picker(&mut self) {
+        self.stash_ui.open = false;
+        self.stash_ui.query.clear();
+        self.stash_ui.stashes.clear();
+        self.stash_ui.filtered.clear();
+        self.stash_ui.list_state.select(None);
+        self.stash_ui.confirm = None;
+        self.stash_ui.status = None;
+    }
+
+    fn stash_apply_selected(&mut self) {
+        self.stash_ui.status = None;
+        if self.pending_job.is_some() {
+            self.stash_ui.status = Some("Busy".to_string());
+            return;
+        }
+
+        let Some(repo_root) = self.git.repo_root.clone() else {
+            self.stash_ui.status = Some("Not a git repository".to_string());
+            return;
+        };
+
+        let Some(sel) = self.stash_ui.selected_stash() else {
+            self.stash_ui.status = Some("No stash selected".to_string());
+            return;
+        };
+        let selector = sel.selector.clone();
+        let cmd = format!("git stash apply {}", selector);
+
+        self.start_git_job(cmd, true, false, move || {
+            git_ops::stash_apply(&repo_root, &selector)
+        });
+        self.close_stash_picker();
+    }
+
+    fn confirm_stash_action(&mut self) {
+        self.stash_ui.status = None;
+        if self.pending_job.is_some() {
+            self.stash_ui.status = Some("Busy".to_string());
+            return;
+        }
+
+        let Some(repo_root) = self.git.repo_root.clone() else {
+            self.stash_ui.status = Some("Not a git repository".to_string());
+            return;
+        };
+
+        let Some((action, selector)) = self.stash_ui.confirm.take() else {
+            return;
+        };
+
+        match action {
+            StashConfirmAction::Pop => {
+                let rr = repo_root.clone();
+                let sel = selector.clone();
+                let cmd = format!("git stash pop {}", sel);
+                self.start_git_job(cmd, true, false, move || git_ops::stash_pop(&rr, &sel));
+            }
+            StashConfirmAction::Drop => {
+                let rr = repo_root.clone();
+                let sel = selector.clone();
+                let cmd = format!("git stash drop {}", sel);
+                self.start_git_job(cmd, true, false, move || git_ops::stash_drop(&rr, &sel));
+            }
+        }
+
+        self.close_stash_picker();
+    }
+
     fn branch_checkout_selected(&mut self, force: bool) {
         let Some(repo_root) = self.git.repo_root.clone() else {
             self.branch_ui.status = Some("Not a git repository".to_string());
@@ -933,6 +1287,8 @@ impl App {
         let Some(repo_root) = self.git.repo_root.clone() else {
             self.log_ui.history.clear();
             self.log_ui.reflog.clear();
+            self.log_ui.history_filtered.clear();
+            self.log_ui.reflog_filtered.clear();
             self.log_ui.history_state.select(None);
             self.log_ui.reflog_state.select(None);
             self.refresh_log_diff();
@@ -942,47 +1298,24 @@ impl App {
         match git_ops::list_history(&repo_root, 200) {
             Ok(items) => {
                 self.log_ui.history = items;
-                if self.log_ui.history.is_empty() {
-                    self.log_ui.history_state.select(None);
-                } else if self
-                    .log_ui
-                    .history_state
-                    .selected()
-                    .map(|i| i >= self.log_ui.history.len())
-                    .unwrap_or(true)
-                {
-                    self.log_ui.history_state.select(Some(0));
-                }
             }
             Err(e) => {
                 self.log_ui.status = Some(e);
                 self.log_ui.history.clear();
-                self.log_ui.history_state.select(None);
             }
         }
 
         match git_ops::list_reflog(&repo_root, 200) {
             Ok(items) => {
                 self.log_ui.reflog = items;
-                if self.log_ui.reflog.is_empty() {
-                    self.log_ui.reflog_state.select(None);
-                } else if self
-                    .log_ui
-                    .reflog_state
-                    .selected()
-                    .map(|i| i >= self.log_ui.reflog.len())
-                    .unwrap_or(true)
-                {
-                    self.log_ui.reflog_state.select(Some(0));
-                }
             }
             Err(e) => {
                 self.log_ui.status = Some(e);
                 self.log_ui.reflog.clear();
-                self.log_ui.reflog_state.select(None);
             }
         }
 
+        self.log_ui.update_filtered();
         self.refresh_log_diff();
     }
 
@@ -997,11 +1330,8 @@ impl App {
                         .push("Not a git repository".to_string());
                     return;
                 };
-                let Some(sel) = self.log_ui.history_state.selected() else {
+                let Some(entry) = self.selected_history_entry() else {
                     self.log_ui.diff_lines.push("No commits".to_string());
-                    return;
-                };
-                let Some(entry) = self.log_ui.history.get(sel) else {
                     return;
                 };
                 let hash = entry.hash.clone();
@@ -1015,11 +1345,8 @@ impl App {
                         .push("Not a git repository".to_string());
                     return;
                 };
-                let Some(sel) = self.log_ui.reflog_state.selected() else {
+                let Some(entry) = self.selected_reflog_entry() else {
                     self.log_ui.diff_lines.push("No reflog entries".to_string());
-                    return;
-                };
-                let Some(entry) = self.log_ui.reflog.get(sel) else {
                     return;
                 };
                 let hash = entry.hash.clone();
@@ -1130,8 +1457,8 @@ impl App {
 
     fn active_log_len(&self) -> usize {
         match self.log_ui.subtab {
-            LogSubTab::History => self.log_ui.history.len(),
-            LogSubTab::Reflog => self.log_ui.reflog.len(),
+            LogSubTab::History => self.log_ui.history_filtered.len(),
+            LogSubTab::Reflog => self.log_ui.reflog_filtered.len(),
             LogSubTab::Commands => self.git_log.len(),
         }
     }
@@ -1139,6 +1466,11 @@ impl App {
     fn set_log_subtab(&mut self, subtab: LogSubTab) {
         self.log_ui.inspect.close();
         self.log_ui.set_subtab(subtab);
+
+        if self.log_ui.subtab == LogSubTab::Reflog {
+            self.log_ui.zoom = LogZoom::List;
+            self.log_ui.focus = LogPaneFocus::Commits;
+        }
 
         if self.log_ui.subtab == LogSubTab::Commands {
             if self.git_log.is_empty() {
@@ -1153,23 +1485,26 @@ impl App {
                 self.log_ui.command_state.select(Some(0));
             }
         } else {
-            if self.log_ui.subtab == LogSubTab::History && !self.log_ui.history.is_empty() {
+            self.log_ui.update_filtered();
+
+            if self.log_ui.subtab == LogSubTab::History && !self.log_ui.history_filtered.is_empty()
+            {
                 if self
                     .log_ui
                     .history_state
                     .selected()
-                    .map(|i| i >= self.log_ui.history.len())
+                    .map(|i| i >= self.log_ui.history_filtered.len())
                     .unwrap_or(true)
                 {
                     self.log_ui.history_state.select(Some(0));
                 }
             }
-            if self.log_ui.subtab == LogSubTab::Reflog && !self.log_ui.reflog.is_empty() {
+            if self.log_ui.subtab == LogSubTab::Reflog && !self.log_ui.reflog_filtered.is_empty() {
                 if self
                     .log_ui
                     .reflog_state
                     .selected()
-                    .map(|i| i >= self.log_ui.reflog.len())
+                    .map(|i| i >= self.log_ui.reflog_filtered.len())
                     .unwrap_or(true)
                 {
                     self.log_ui.reflog_state.select(Some(0));
@@ -1951,6 +2286,7 @@ impl App {
         if self.operation_popup.is_some()
             || self.discard_confirm.is_some()
             || self.branch_ui.open
+            || self.stash_ui.open
             || self.log_ui.inspect.open
         {
             return;
@@ -2034,6 +2370,7 @@ impl App {
             CommandId::GitPullRebase => self.start_operation_job("git pull --rebase", true),
             CommandId::GitPush => self.start_operation_job("git push", true),
             CommandId::OpenBranchPicker => self.open_branch_picker(),
+            CommandId::OpenStashPicker => self.open_stash_picker(),
             CommandId::ClearGitLog => {
                 self.git_log.clear();
                 self.log_ui.command_state.select(None);
@@ -2298,6 +2635,103 @@ impl App {
     }
 
     fn handle_click(&mut self, row: u16, col: u16, modifiers: KeyModifiers) {
+        if self.theme_picker.open || self.command_palette.open {
+            self.context_menu = None;
+            self.pending_menu_action = None;
+
+            let (tw, th) = crossterm::terminal::size().unwrap_or((0, 0));
+            let area = Rect::new(0, 0, tw, th);
+
+            if self.command_palette.open {
+                let w = area.width.min(56).saturating_sub(2).max(32);
+                let desired_h = COMMAND_PALETTE_ITEMS.len() as u16 + 6;
+                let h = desired_h.min(area.height.saturating_sub(2)).max(10);
+                let x = area.x + (area.width.saturating_sub(w)) / 2;
+                let y = area.y + (area.height.saturating_sub(h)) / 2;
+                let modal = Rect::new(x, y, w, h);
+
+                if col < modal.x
+                    || col >= modal.x + modal.width
+                    || row < modal.y
+                    || row >= modal.y + modal.height
+                {
+                    self.command_palette.open = false;
+                    return;
+                }
+
+                let inner = modal.inner(Margin {
+                    vertical: 1,
+                    horizontal: 2,
+                });
+                let rows = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Min(0), Constraint::Length(1)])
+                    .split(inner);
+
+                let list_inner = rows[0].inner(Margin {
+                    vertical: 1,
+                    horizontal: 1,
+                });
+
+                if row >= list_inner.y && row < list_inner.y + list_inner.height {
+                    let offset = self.command_palette.list_state.offset();
+                    let idx = offset + (row - list_inner.y) as usize;
+                    if idx < COMMAND_PALETTE_ITEMS.len() {
+                        let was_selected = self.command_palette.list_state.selected() == Some(idx);
+                        self.command_palette.list_state.select(Some(idx));
+                        if was_selected {
+                            self.run_command_palette_selection();
+                        }
+                    }
+                }
+                return;
+            }
+
+            if self.theme_picker.open {
+                let w = 35u16.min(area.width.saturating_sub(2)).max(30);
+                let h = 11u16.min(area.height.saturating_sub(2)).max(9);
+                let x = area.x + (area.width.saturating_sub(w)) / 2;
+                let y = area.y + (area.height.saturating_sub(h)) / 2;
+                let modal = Rect::new(x, y, w, h);
+
+                if col < modal.x
+                    || col >= modal.x + modal.width
+                    || row < modal.y
+                    || row >= modal.y + modal.height
+                {
+                    self.theme_picker.open = false;
+                    return;
+                }
+
+                let inner = modal.inner(Margin {
+                    vertical: 1,
+                    horizontal: 2,
+                });
+                let rows = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Min(0), Constraint::Length(1)])
+                    .split(inner);
+
+                let list_inner = rows[0].inner(Margin {
+                    vertical: 1,
+                    horizontal: 1,
+                });
+
+                if row >= list_inner.y && row < list_inner.y + list_inner.height {
+                    let offset = self.theme_picker.list_state.offset();
+                    let idx = offset + (row - list_inner.y) as usize;
+                    if idx < THEME_ORDER.len() {
+                        let was_selected = self.theme_picker.list_state.selected() == Some(idx);
+                        self.theme_picker.list_state.select(Some(idx));
+                        if was_selected {
+                            self.apply_theme_picker_selection();
+                        }
+                    }
+                }
+                return;
+            }
+        }
+
         if self.context_menu.is_some() {
             let mut hit_menu = false;
             for zone in self.zones.iter().rev() {
@@ -2512,6 +2946,32 @@ impl App {
             AppAction::CancelBranchCheckout => {
                 self.branch_ui.confirm_checkout = None;
             }
+            AppAction::OpenStashPicker => self.open_stash_picker(),
+            AppAction::CloseStashPicker => self.close_stash_picker(),
+            AppAction::SelectStash(idx) => {
+                self.stash_ui.list_state.select(Some(idx));
+            }
+            AppAction::StashApply => self.stash_apply_selected(),
+            AppAction::StashPop => {
+                self.stash_ui.status = None;
+                let Some(sel) = self.stash_ui.selected_stash() else {
+                    self.stash_ui.status = Some("No stash selected".to_string());
+                    return;
+                };
+                self.stash_ui.confirm = Some((StashConfirmAction::Pop, sel.selector.clone()));
+            }
+            AppAction::StashDrop => {
+                self.stash_ui.status = None;
+                let Some(sel) = self.stash_ui.selected_stash() else {
+                    self.stash_ui.status = Some("No stash selected".to_string());
+                    return;
+                };
+                self.stash_ui.confirm = Some((StashConfirmAction::Drop, sel.selector.clone()));
+            }
+            AppAction::ConfirmStashAction => self.confirm_stash_action(),
+            AppAction::CancelStashAction => {
+                self.stash_ui.confirm = None;
+            }
             AppAction::GitFetch => self.start_operation_job("git fetch --prune", true),
             AppAction::GitPullRebase => self.start_operation_job("git pull --rebase", true),
             AppAction::GitPush => self.start_operation_job("git push", true),
@@ -2688,12 +3148,7 @@ impl App {
             }
             Tab::Log => match self.log_ui.subtab {
                 LogSubTab::History => {
-                    let Some(entry) = self
-                        .log_ui
-                        .history_state
-                        .selected()
-                        .and_then(|i| self.log_ui.history.get(i))
-                    else {
+                    let Some(entry) = self.selected_history_entry() else {
                         return;
                     };
 
@@ -2708,12 +3163,7 @@ impl App {
                     ));
                 }
                 LogSubTab::Reflog => {
-                    let Some(entry) = self
-                        .log_ui
-                        .reflog_state
-                        .selected()
-                        .and_then(|i| self.log_ui.reflog.get(i))
-                    else {
+                    let Some(entry) = self.selected_reflog_entry() else {
                         return;
                     };
 
@@ -2855,38 +3305,35 @@ impl App {
             .unwrap_or_default()
     }
 
+    fn selected_history_entry(&self) -> Option<&git_ops::CommitEntry> {
+        let sel = self.log_ui.history_state.selected()?;
+        let idx = *self.log_ui.history_filtered.get(sel)?;
+        self.log_ui.history.get(idx)
+    }
+
+    fn selected_reflog_entry(&self) -> Option<&git_ops::ReflogEntry> {
+        let sel = self.log_ui.reflog_state.selected()?;
+        let idx = *self.log_ui.reflog_filtered.get(sel)?;
+        self.log_ui.reflog.get(idx)
+    }
+
     fn selected_log_hash(&self) -> Option<String> {
         match self.log_ui.subtab {
-            LogSubTab::History => self
+            LogSubTab::History => self.selected_history_entry().map(|e| e.hash.clone()),
+            LogSubTab::Reflog => self.selected_reflog_entry().map(|e| e.hash.clone()),
+            LogSubTab::Commands => self
                 .log_ui
-                .history_state
+                .command_state
                 .selected()
-                .and_then(|i| self.log_ui.history.get(i))
-                .map(|e| e.hash.clone()),
-            LogSubTab::Reflog => self
-                .log_ui
-                .reflog_state
-                .selected()
-                .and_then(|i| self.log_ui.reflog.get(i))
-                .map(|e| e.hash.clone()),
-            LogSubTab::Commands => None,
+                .and_then(|i| self.git_log.get(i))
+                .map(|e| e.cmd.clone()),
         }
     }
 
     fn selected_log_subject(&self) -> Option<String> {
         match self.log_ui.subtab {
-            LogSubTab::History => self
-                .log_ui
-                .history_state
-                .selected()
-                .and_then(|i| self.log_ui.history.get(i))
-                .map(|e| e.subject.clone()),
-            LogSubTab::Reflog => self
-                .log_ui
-                .reflog_state
-                .selected()
-                .and_then(|i| self.log_ui.reflog.get(i))
-                .map(|e| e.subject.clone()),
+            LogSubTab::History => self.selected_history_entry().map(|e| e.subject.clone()),
+            LogSubTab::Reflog => self.selected_reflog_entry().map(|e| e.subject.clone()),
             LogSubTab::Commands => None,
         }
     }
@@ -2938,55 +3385,119 @@ impl App {
     fn open_log_inspect(&mut self) {
         let (title, body) = match self.log_ui.subtab {
             LogSubTab::History => {
-                let Some(sel) = self.log_ui.history_state.selected() else {
-                    self.set_status("No selection");
-                    return;
-                };
-                let Some(e) = self.log_ui.history.get(sel) else {
+                let Some(e) = self.selected_history_entry() else {
                     self.set_status("No selection");
                     return;
                 };
 
-                let mut body = String::new();
-                body.push_str("SHA: ");
-                body.push_str(&e.hash);
-                body.push('\n');
-                body.push_str("Date: ");
-                body.push_str(&e.date);
-                body.push('\n');
-                body.push_str("Author: ");
-                body.push_str(&e.author);
-                body.push('\n');
-                body.push('\n');
-                body.push_str("Subject:\n");
-                body.push_str(&e.subject);
-                body.push('\n');
+                let title = format!("Inspect {}", e.short);
 
-                (format!("Inspect {}", e.short), body)
+                let body = if let Some(repo_root) = self.git.repo_root.clone() {
+                    match git_ops::show_commit_header(&repo_root, &e.hash) {
+                        Ok(text) => text,
+                        Err(err) => {
+                            let mut out = String::new();
+                            out.push_str("git show failed: ");
+                            out.push_str(&err);
+                            out.push('\n');
+                            out.push('\n');
+                            out.push_str("SHA: ");
+                            out.push_str(&e.hash);
+                            out.push('\n');
+                            if !e.decoration.trim().is_empty() {
+                                out.push_str("Refs: ");
+                                out.push_str(&e.decoration);
+                                out.push('\n');
+                            }
+                            out.push_str("Date: ");
+                            out.push_str(&e.date);
+                            out.push('\n');
+                            out.push_str("Author: ");
+                            out.push_str(&e.author);
+                            out.push('\n');
+                            out.push('\n');
+                            out.push_str("Subject:\n");
+                            out.push_str(&e.subject);
+                            out.push('\n');
+                            out
+                        }
+                    }
+                } else {
+                    let mut out = String::new();
+                    out.push_str("SHA: ");
+                    out.push_str(&e.hash);
+                    out.push('\n');
+                    if !e.decoration.trim().is_empty() {
+                        out.push_str("Refs: ");
+                        out.push_str(&e.decoration);
+                        out.push('\n');
+                    }
+                    out.push_str("Date: ");
+                    out.push_str(&e.date);
+                    out.push('\n');
+                    out.push_str("Author: ");
+                    out.push_str(&e.author);
+                    out.push('\n');
+                    out.push('\n');
+                    out.push_str("Subject:\n");
+                    out.push_str(&e.subject);
+                    out.push('\n');
+                    out
+                };
+
+                (title, body)
             }
             LogSubTab::Reflog => {
-                let Some(sel) = self.log_ui.reflog_state.selected() else {
-                    self.set_status("No selection");
-                    return;
-                };
-                let Some(e) = self.log_ui.reflog.get(sel) else {
+                let Some(e) = self.selected_reflog_entry() else {
                     self.set_status("No selection");
                     return;
                 };
 
-                let mut body = String::new();
-                body.push_str("SHA: ");
-                body.push_str(&e.hash);
-                body.push('\n');
-                body.push_str("Selector: ");
-                body.push_str(&e.selector);
-                body.push('\n');
-                body.push('\n');
-                body.push_str("Subject:\n");
-                body.push_str(&e.subject);
-                body.push('\n');
+                let title = format!("Inspect {}", e.selector);
 
-                (format!("Inspect {}", e.selector), body)
+                let body = if let Some(repo_root) = self.git.repo_root.clone() {
+                    match git_ops::show_commit_header(&repo_root, &e.hash) {
+                        Ok(text) => text,
+                        Err(err) => {
+                            let mut out = String::new();
+                            out.push_str("git show failed: ");
+                            out.push_str(&err);
+                            out.push('\n');
+                            out.push('\n');
+                            out.push_str("SHA: ");
+                            out.push_str(&e.hash);
+                            out.push('\n');
+                            out.push_str("Selector: ");
+                            out.push_str(&e.selector);
+                            out.push('\n');
+                            out.push('\n');
+                            out.push_str("Subject:\n");
+                            out.push_str(&e.subject);
+                            out.push('\n');
+                            out
+                        }
+                    }
+                } else {
+                    let mut out = String::new();
+                    out.push_str("SHA: ");
+                    out.push_str(&e.hash);
+                    out.push('\n');
+                    out.push_str("Selector: ");
+                    out.push_str(&e.selector);
+                    out.push('\n');
+                    if !e.decoration.trim().is_empty() {
+                        out.push_str("Refs: ");
+                        out.push_str(&e.decoration);
+                        out.push('\n');
+                    }
+                    out.push('\n');
+                    out.push_str("Subject:\n");
+                    out.push_str(&e.subject);
+                    out.push('\n');
+                    out
+                };
+
+                (title, body)
             }
             LogSubTab::Commands => {
                 let Some(sel) = self.log_ui.command_state.selected() else {
@@ -3034,14 +3545,19 @@ impl App {
 
         match next {
             LogZoom::Diff => self.log_ui.focus = LogPaneFocus::Diff,
-            LogZoom::List => self.log_ui.focus = LogPaneFocus::Commits,
+            LogZoom::List => {
+                self.log_ui.focus = LogPaneFocus::Commits;
+                if self.log_ui.subtab == LogSubTab::History {
+                    self.open_log_inspect();
+                }
+            }
             LogZoom::None => {}
         }
     }
 
     fn cycle_log_focus(&mut self) {
         let files_mode = self.log_ui.detail_mode == LogDetailMode::Files
-            && self.log_ui.subtab != LogSubTab::Commands;
+            && self.log_ui.subtab == LogSubTab::History;
 
         match self.log_ui.zoom {
             LogZoom::List => {
@@ -3260,6 +3776,108 @@ fn format_size(size: u64) -> String {
     }
 }
 
+#[derive(Default, Debug)]
+struct LogFilterQuery {
+    author: Vec<String>,
+    refs: Vec<String>,
+    tokens: Vec<String>,
+}
+
+fn parse_log_filter_query(input: &str) -> LogFilterQuery {
+    let mut q = LogFilterQuery::default();
+
+    for raw in input.split_whitespace() {
+        let t = raw.trim();
+        if t.is_empty() {
+            continue;
+        }
+
+        if let Some(rest) = t.strip_prefix('@') {
+            if !rest.is_empty() {
+                q.author.push(rest.to_string());
+            }
+            continue;
+        }
+
+        if let Some(rest) = t.strip_prefix("author:").or_else(|| t.strip_prefix("a:")) {
+            if !rest.is_empty() {
+                q.author.push(rest.to_string());
+            }
+            continue;
+        }
+
+        if let Some(rest) = t.strip_prefix("ref:").or_else(|| t.strip_prefix("tag:")) {
+            if !rest.is_empty() {
+                q.refs.push(rest.to_string());
+            }
+            continue;
+        }
+
+        q.tokens.push(t.to_string());
+    }
+
+    q
+}
+
+fn fuzzy_score(haystack: &str, needle: &str) -> Option<i32> {
+    let n = needle.trim();
+    if n.is_empty() {
+        return Some(0);
+    }
+
+    let mut score: i32 = 0;
+    let mut last_match: Option<usize> = None;
+    let mut pos = 0usize;
+
+    for ch in n.chars() {
+        let mut found_at: Option<usize> = None;
+        for (i, hc) in haystack[pos..].char_indices() {
+            if hc == ch {
+                found_at = Some(pos + i);
+                break;
+            }
+        }
+        let idx = found_at?;
+
+        score += 10;
+        if let Some(prev) = last_match {
+            if idx == prev + 1 {
+                score += 15;
+            } else {
+                let gap = idx.saturating_sub(prev + 1) as i32;
+                score -= gap.min(30);
+            }
+        } else {
+            score += (30 - idx as i32).max(0);
+        }
+
+        last_match = Some(idx);
+        pos = idx + ch.len_utf8();
+    }
+
+    Some(score)
+}
+
+fn token_score(haystack: &str, token: &str) -> Option<i32> {
+    let t = token.trim();
+    if t.is_empty() {
+        return Some(0);
+    }
+
+    if haystack.contains(t) {
+        return Some(200 + (t.chars().count() as i32) * 5);
+    }
+
+    let score = fuzzy_score(haystack, t)?;
+    let len = t.chars().count() as i32;
+
+    if len >= 4 && score < len * 10 {
+        return None;
+    }
+
+    Some(score)
+}
+
 fn git_decoration_spans(decoration: &str, palette: theme::Palette) -> Vec<Span<'static>> {
     let deco = decoration.trim();
     if deco.is_empty() {
@@ -3332,6 +3950,25 @@ fn log_history_line(e: &git_ops::CommitEntry, palette: theme::Palette) -> Line<'
         Style::default().fg(palette.fg),
     ));
     spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        e.subject.clone(),
+        Style::default().fg(palette.fg),
+    ));
+
+    Line::from(spans)
+}
+
+fn log_reflog_line(e: &git_ops::ReflogEntry, palette: theme::Palette) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    spans.push(Span::styled(
+        e.selector.clone(),
+        Style::default().fg(palette.fg).add_modifier(Modifier::BOLD),
+    ));
+
+    spans.extend(git_decoration_spans(e.decoration.as_str(), palette));
+
+    spans.push(Span::raw("  "));
     spans.push(Span::styled(
         e.subject.clone(),
         Style::default().fg(palette.fg),
@@ -4520,29 +5157,66 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             if zoom != LogZoom::Diff {
                 let (title, items_len) = match app.log_ui.subtab {
-                    LogSubTab::History => (" History ", app.log_ui.history.len()),
-                    LogSubTab::Reflog => (" Reflog ", app.log_ui.reflog.len()),
+                    LogSubTab::History => (" History ", app.log_ui.history_filtered.len()),
+                    LogSubTab::Reflog => (" Reflog ", app.log_ui.reflog_filtered.len()),
                     LogSubTab::Commands => (" Commands ", app.git_log.len()),
+                };
+
+                let (list_title, border_color) = if app.log_ui.subtab != LogSubTab::Commands {
+                    let q = app.log_ui.filter_query.trim();
+                    let filter_label = if q.is_empty() {
+                        "filter: /".to_string()
+                    } else {
+                        format!("filter: {}", q)
+                    };
+                    let filter_style = if app.log_ui.filter_edit {
+                        Style::default()
+                            .fg(app.palette.accent_primary)
+                            .add_modifier(Modifier::BOLD)
+                    } else if !q.is_empty() {
+                        Style::default().fg(app.palette.accent_primary)
+                    } else {
+                        Style::default().fg(app.palette.border_inactive)
+                    };
+
+                    (
+                        Line::from(vec![
+                            Span::raw(format!("{}({})  ", title, items_len)),
+                            Span::styled(filter_label, filter_style),
+                        ]),
+                        if app.log_ui.filter_edit || !q.is_empty() {
+                            app.palette.accent_primary
+                        } else {
+                            app.palette.border_inactive
+                        },
+                    )
+                } else {
+                    (
+                        Line::raw(format!("{}({})", title, items_len)),
+                        app.palette.border_inactive,
+                    )
                 };
 
                 let list_block = Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(app.palette.border_inactive))
-                    .title(format!("{}({}) ", title, items_len));
+                    .border_style(Style::default().fg(border_color))
+                    .title(list_title);
 
                 let list_items: Vec<ListItem> = match app.log_ui.subtab {
                     LogSubTab::History => app
                         .log_ui
-                        .history
+                        .history_filtered
                         .iter()
+                        .filter_map(|idx| app.log_ui.history.get(*idx))
                         .map(|e| ListItem::new(log_history_line(e, app.palette)))
                         .collect(),
                     LogSubTab::Reflog => app
                         .log_ui
-                        .reflog
+                        .reflog_filtered
                         .iter()
-                        .map(|e| ListItem::new(format!("{}  {}", e.selector, e.subject)))
+                        .filter_map(|idx| app.log_ui.reflog.get(*idx))
+                        .map(|e| ListItem::new(log_reflog_line(e, app.palette)))
                         .collect(),
                     LogSubTab::Commands => {
                         let now = Instant::now();
@@ -4602,7 +5276,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             if zoom != LogZoom::List {
                 let files_mode = app.log_ui.detail_mode == LogDetailMode::Files
-                    && app.log_ui.subtab != LogSubTab::Commands;
+                    && app.log_ui.subtab == LogSubTab::History;
 
                 let mut diff_view_area = diff_area;
                 if files_mode {
@@ -5142,6 +5816,12 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 app.palette.accent_primary,
                 true,
             ));
+            buttons.push((
+                " Stash (z) ".to_string(),
+                AppAction::OpenStashPicker,
+                app.palette.accent_secondary,
+                app.pending_job.is_none() && !app.commit.busy,
+            ));
 
             let enabled = app.pending_job.is_none() && !app.commit.busy && !app.branch_ui.open;
             let in_conflict_view = app.git.selected_entry().is_some_and(|e| e.is_conflict);
@@ -5391,7 +6071,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             );
         }
     } else {
-        let hint = "Ctrl+P menu  T theme";
+        let hint = match app.current_tab {
+            Tab::Explorer => "Ctrl+P menu  T theme",
+            Tab::Git => "Ctrl+P menu  T theme  z stash",
+            Tab::Log => "/ filter  @author  ref:tag  Ctrl+U clear",
+        };
         let used = btn_x.saturating_sub(footer_area.x);
         let available = footer_area.width.saturating_sub(used).saturating_sub(2);
         if available > 0 {
@@ -5588,6 +6272,193 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         }
     }
 
+    if app.stash_ui.open {
+        zones.push(ClickZone {
+            rect: area,
+            action: AppAction::CloseStashPicker,
+        });
+
+        let w = area.width.min(96).saturating_sub(2).max(60);
+        let h = area.height.min(22).saturating_sub(2).max(12);
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let modal = Rect::new(x, y, w, h);
+
+        f.render_widget(Clear, modal);
+
+        let title = if app.stash_ui.query.trim().is_empty() {
+            " Stash (z) ".to_string()
+        } else {
+            format!(" Stash (z)  filter: {} ", app.stash_ui.query.trim())
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(app.palette.accent_primary))
+            .title(title);
+        f.render_widget(block.clone(), modal);
+
+        let inner = modal.inner(Margin {
+            vertical: 1,
+            horizontal: 2,
+        });
+
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(0),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let filter_hint = "Type to filter  Backspace delete  Ctrl+U clear";
+        let filter_style = if app.stash_ui.query.trim().is_empty() {
+            Style::default().fg(app.palette.border_inactive)
+        } else {
+            Style::default().fg(app.palette.accent_primary)
+        };
+        f.render_widget(Paragraph::new(filter_hint).style(filter_style), rows[0]);
+
+        let list_items: Vec<ListItem> = app
+            .stash_ui
+            .filtered
+            .iter()
+            .filter_map(|idx| app.stash_ui.stashes.get(*idx))
+            .map(|s| ListItem::new(format!("{}  {}", s.selector, s.subject)))
+            .collect();
+
+        let list = List::new(list_items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(app.palette.border_inactive))
+                    .title(format!(" Stashes ({}) ", app.stash_ui.filtered.len())),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(app.palette.selection_bg)
+                    .fg(app.palette.fg)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▎ ");
+
+        f.render_stateful_widget(list, rows[1], &mut app.stash_ui.list_state);
+
+        let list_inner = rows[1].inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+        let start = app.stash_ui.list_state.offset();
+        let end = (start + list_inner.height as usize).min(app.stash_ui.filtered.len());
+        for (i, idx) in (start..end).enumerate() {
+            let rect = Rect::new(list_inner.x, list_inner.y + i as u16, list_inner.width, 1);
+            zones.push(ClickZone {
+                rect,
+                action: AppAction::SelectStash(idx),
+            });
+        }
+
+        let mut bx = rows[2].x;
+        for (label, action, color) in [
+            (
+                " Apply (a) ",
+                AppAction::StashApply,
+                app.palette.accent_secondary,
+            ),
+            (" Pop (p) ", AppAction::StashPop, app.palette.accent_primary),
+            (" Drop (d) ", AppAction::StashDrop, app.palette.btn_bg),
+            (" Close ", AppAction::CloseStashPicker, app.palette.menu_bg),
+        ] {
+            let bw = label.len() as u16;
+            let rect = Rect::new(bx, rows[2].y, bw, 1);
+            let style = Style::default()
+                .bg(color)
+                .fg(app.palette.btn_fg)
+                .add_modifier(Modifier::BOLD);
+            f.render_widget(Paragraph::new(label).style(style), rect);
+            zones.push(ClickZone { rect, action });
+            bx += bw + 2;
+        }
+
+        if let Some(msg) = app.stash_ui.status.as_deref() {
+            f.render_widget(
+                Paragraph::new(msg).style(Style::default().fg(app.palette.btn_bg)),
+                Rect::new(
+                    rows[2].x + 48,
+                    rows[2].y,
+                    rows[2].width.saturating_sub(48),
+                    1,
+                ),
+            );
+        }
+
+        if let Some((action, selector)) = app.stash_ui.confirm.as_ref() {
+            let w = modal.width.min(70).saturating_sub(2).max(44);
+            let h = 7u16.min(modal.height.saturating_sub(2)).max(7);
+            let x = modal.x + (modal.width.saturating_sub(w)) / 2;
+            let y = modal.y + (modal.height.saturating_sub(h)) / 2;
+            let confirm = Rect::new(x, y, w, h);
+
+            f.render_widget(Clear, confirm);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(app.palette.btn_bg))
+                .title(" Confirm ");
+            f.render_widget(block.clone(), confirm);
+
+            let inner = confirm.inner(Margin {
+                vertical: 1,
+                horizontal: 2,
+            });
+
+            let verb = match action {
+                StashConfirmAction::Pop => "pop",
+                StashConfirmAction::Drop => "drop",
+            };
+
+            let text = vec![
+                Line::raw(format!("About to {} {}", verb, selector)),
+                Line::raw(""),
+                Line::raw("Continue?"),
+            ];
+            f.render_widget(
+                Paragraph::new(text).style(Style::default().fg(app.palette.fg)),
+                Rect::new(
+                    inner.x,
+                    inner.y,
+                    inner.width,
+                    inner.height.saturating_sub(1),
+                ),
+            );
+
+            let by = inner.y + inner.height.saturating_sub(1);
+            let mut cx = inner.x;
+            for (label, action, color) in [
+                (
+                    " Confirm ",
+                    AppAction::ConfirmStashAction,
+                    app.palette.accent_secondary,
+                ),
+                (" Cancel ", AppAction::CancelStashAction, app.palette.btn_bg),
+            ] {
+                let bw = label.len() as u16;
+                let rect = Rect::new(cx, by, bw, 1);
+                let style = Style::default()
+                    .bg(color)
+                    .fg(app.palette.btn_fg)
+                    .add_modifier(Modifier::BOLD);
+                f.render_widget(Paragraph::new(label).style(style), rect);
+                zones.push(ClickZone { rect, action });
+                cx += bw + 2;
+            }
+        }
+    }
+
     if let Some(menu) = &app.context_menu {
         let width = 30u16.min(area.width.saturating_sub(2));
         let height = (menu.options.len() as u16 + 2).min(area.height.saturating_sub(2));
@@ -5772,7 +6643,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         });
 
         let w = area.width.min(90).saturating_sub(2).max(50);
-        let h = area.height.min(18).saturating_sub(2).max(8);
+        let h = area.height.saturating_sub(4).min(28).max(12);
         let x = area.x + (area.width.saturating_sub(w)) / 2;
         let y = area.y + (area.height.saturating_sub(h)) / 2;
         let modal = Rect::new(x, y, w, h);
@@ -6040,14 +6911,18 @@ fn main() -> io::Result<()> {
                     KeyCode::Char('1')
                         if app.operation_popup.is_none()
                             && !app.theme_picker.open
-                            && !app.command_palette.open =>
+                            && !app.command_palette.open
+                            && !app.stash_ui.open
+                            && !app.branch_ui.open =>
                     {
                         app.current_tab = Tab::Explorer;
                     }
                     KeyCode::Char('2')
                         if app.operation_popup.is_none()
                             && !app.theme_picker.open
-                            && !app.command_palette.open =>
+                            && !app.command_palette.open
+                            && !app.stash_ui.open
+                            && !app.branch_ui.open =>
                     {
                         app.current_tab = Tab::Git;
                         app.git.refresh(&app.current_path);
@@ -6056,7 +6931,9 @@ fn main() -> io::Result<()> {
                     KeyCode::Char('3')
                         if app.operation_popup.is_none()
                             && !app.theme_picker.open
-                            && !app.command_palette.open =>
+                            && !app.command_palette.open
+                            && !app.stash_ui.open
+                            && !app.branch_ui.open =>
                     {
                         app.current_tab = Tab::Log;
                         app.refresh_log_data();
@@ -6086,12 +6963,30 @@ fn main() -> io::Result<()> {
                         app.operation_popup = None;
                         app.theme_picker.open = false;
                         app.command_palette.open = false;
+                        if app.current_tab == Tab::Log && app.log_ui.filter_edit {
+                            if app.log_ui.filter_query.trim().is_empty() {
+                                app.log_ui.filter_edit = false;
+                            } else {
+                                app.log_ui.filter_query.clear();
+                                app.log_ui.update_filtered();
+                                app.refresh_log_diff();
+                            }
+                        } else {
+                            app.log_ui.filter_edit = false;
+                        }
                         app.log_ui.inspect.close();
                         if app.branch_ui.open {
                             if app.branch_ui.confirm_checkout.is_some() {
                                 app.branch_ui.confirm_checkout = None;
                             } else {
                                 app.close_branch_picker();
+                            }
+                        }
+                        if app.stash_ui.open {
+                            if app.stash_ui.confirm.is_some() {
+                                app.stash_ui.confirm = None;
+                            } else {
+                                app.close_stash_picker();
                             }
                         }
                         if app.current_tab == Tab::Git {
@@ -6238,6 +7133,72 @@ fn main() -> io::Result<()> {
                                                 _ => {}
                                             }
                                         }
+                                    } else if app.stash_ui.open {
+                                        if app.stash_ui.confirm.is_some() {
+                                            match key.code {
+                                                KeyCode::Enter => app.confirm_stash_action(),
+                                                KeyCode::Esc
+                                                | KeyCode::Char('n')
+                                                | KeyCode::Char('N') => {
+                                                    app.stash_ui.confirm = None;
+                                                }
+                                                _ => {}
+                                            }
+                                        } else {
+                                            match key.code {
+                                                KeyCode::Esc => app.close_stash_picker(),
+                                                KeyCode::Enter => app.stash_apply_selected(),
+                                                KeyCode::Char('a') => app.stash_apply_selected(),
+                                                KeyCode::Char('p') => {
+                                                    app.stash_ui.status = None;
+                                                    if let Some(sel) = app.stash_ui.selected_stash()
+                                                    {
+                                                        app.stash_ui.confirm = Some((
+                                                            StashConfirmAction::Pop,
+                                                            sel.selector.clone(),
+                                                        ));
+                                                    } else {
+                                                        app.stash_ui.status =
+                                                            Some("No stash selected".to_string());
+                                                    }
+                                                }
+                                                KeyCode::Char('d') => {
+                                                    app.stash_ui.status = None;
+                                                    if let Some(sel) = app.stash_ui.selected_stash()
+                                                    {
+                                                        app.stash_ui.confirm = Some((
+                                                            StashConfirmAction::Drop,
+                                                            sel.selector.clone(),
+                                                        ));
+                                                    } else {
+                                                        app.stash_ui.status =
+                                                            Some("No stash selected".to_string());
+                                                    }
+                                                }
+                                                KeyCode::Char('j') | KeyCode::Down => {
+                                                    app.stash_ui.move_selection(1)
+                                                }
+                                                KeyCode::Char('k') | KeyCode::Up => {
+                                                    app.stash_ui.move_selection(-1)
+                                                }
+                                                KeyCode::Backspace => {
+                                                    app.stash_ui.query.pop();
+                                                    app.stash_ui.update_filtered();
+                                                }
+                                                KeyCode::Char(ch)
+                                                    if !key
+                                                        .modifiers
+                                                        .contains(KeyModifiers::CONTROL)
+                                                        && !key
+                                                            .modifiers
+                                                            .contains(KeyModifiers::ALT) =>
+                                                {
+                                                    app.stash_ui.query.push(ch);
+                                                    app.stash_ui.update_filtered();
+                                                }
+                                                _ => {}
+                                            }
+                                        }
                                     } else if app.commit.open {
                                         if key.modifiers.contains(KeyModifiers::CONTROL)
                                             && matches!(
@@ -6303,6 +7264,7 @@ fn main() -> io::Result<()> {
                                                 });
                                             }
                                             KeyCode::Char('B') => app.open_branch_picker(),
+                                            KeyCode::Char('z') => app.open_stash_picker(),
                                             KeyCode::Char('c') => {
                                                 app.commit.open = true;
                                                 app.commit.focus = CommitFocus::Message;
@@ -6413,11 +7375,27 @@ fn main() -> io::Result<()> {
                                             KeyCode::Esc | KeyCode::Enter => {
                                                 app.log_ui.inspect.close()
                                             }
-                                            KeyCode::Char('j') | KeyCode::Down => {
+                                            KeyCode::Down => {
+                                                app.move_log_selection(1);
+                                                app.open_log_inspect();
+                                            }
+                                            KeyCode::Up => {
+                                                app.move_log_selection(-1);
+                                                app.open_log_inspect();
+                                            }
+                                            KeyCode::PageDown => {
+                                                app.log_ui.inspect.scroll_y =
+                                                    app.log_ui.inspect.scroll_y.saturating_add(10)
+                                            }
+                                            KeyCode::PageUp => {
+                                                app.log_ui.inspect.scroll_y =
+                                                    app.log_ui.inspect.scroll_y.saturating_sub(10)
+                                            }
+                                            KeyCode::Char('j') => {
                                                 app.log_ui.inspect.scroll_y =
                                                     app.log_ui.inspect.scroll_y.saturating_add(3)
                                             }
-                                            KeyCode::Char('k') | KeyCode::Up => {
+                                            KeyCode::Char('k') => {
                                                 app.log_ui.inspect.scroll_y =
                                                     app.log_ui.inspect.scroll_y.saturating_sub(3)
                                             }
@@ -6442,6 +7420,39 @@ fn main() -> io::Result<()> {
                                         }
                                     } else {
                                         match key.code {
+                                            KeyCode::Char('/')
+                                                if app.log_ui.subtab != LogSubTab::Commands =>
+                                            {
+                                                app.log_ui.filter_edit = !app.log_ui.filter_edit;
+                                                app.log_ui.focus = LogPaneFocus::Commits;
+                                            }
+                                            KeyCode::Enter if app.log_ui.filter_edit => {
+                                                app.log_ui.filter_edit = false;
+                                            }
+                                            KeyCode::Backspace if app.log_ui.filter_edit => {
+                                                app.log_ui.filter_query.pop();
+                                                app.log_ui.update_filtered();
+                                                app.refresh_log_diff();
+                                            }
+                                            KeyCode::Char('u') | KeyCode::Char('l')
+                                                if app.log_ui.subtab != LogSubTab::Commands
+                                                    && key
+                                                        .modifiers
+                                                        .contains(KeyModifiers::CONTROL) =>
+                                            {
+                                                app.log_ui.filter_query.clear();
+                                                app.log_ui.update_filtered();
+                                                app.refresh_log_diff();
+                                            }
+                                            KeyCode::Char(ch) if app.log_ui.filter_edit => {
+                                                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                                                    && !key.modifiers.contains(KeyModifiers::ALT)
+                                                {
+                                                    app.log_ui.filter_query.push(ch);
+                                                    app.log_ui.update_filtered();
+                                                    app.refresh_log_diff();
+                                                }
+                                            }
                                             KeyCode::Char('h') => {
                                                 app.set_log_subtab(LogSubTab::History)
                                             }
@@ -6460,7 +7471,7 @@ fn main() -> io::Result<()> {
                                                 app.set_status("Log cleared");
                                             }
                                             KeyCode::Char('d')
-                                                if app.log_ui.subtab != LogSubTab::Commands =>
+                                                if app.log_ui.subtab == LogSubTab::History =>
                                             {
                                                 let next = match app.log_ui.detail_mode {
                                                     LogDetailMode::Diff => LogDetailMode::Files,
@@ -6470,7 +7481,7 @@ fn main() -> io::Result<()> {
                                                 app.refresh_log_diff();
                                             }
                                             KeyCode::Char('f')
-                                                if app.log_ui.subtab != LogSubTab::Commands =>
+                                                if app.log_ui.subtab == LogSubTab::History =>
                                             {
                                                 app.log_ui.set_detail_mode(LogDetailMode::Files);
                                                 app.refresh_log_diff();
@@ -6572,138 +7583,188 @@ fn main() -> io::Result<()> {
                     MouseEventKind::Moved => {
                         app.update_context_menu_hover(mouse.row, mouse.column);
                     }
-                    MouseEventKind::ScrollDown => match app.current_tab {
-                        Tab::Explorer => {
-                            if mouse.column >= app.explorer_preview_x {
-                                app.preview_scroll = app.preview_scroll.saturating_add(3);
-                            } else {
-                                let i = app.selected_index().unwrap_or(0);
-                                if i + 3 < app.files.len() {
-                                    app.list_state.select(Some(i + 3));
-                                    app.update_preview();
-                                    app.preview_scroll = 0;
-                                } else {
-                                    app.list_state
-                                        .select(Some(app.files.len().saturating_sub(1)));
-                                    app.update_preview();
+                    MouseEventKind::ScrollDown => {
+                        if app.theme_picker.open {
+                            app.move_theme_picker(3);
+                        } else if app.command_palette.open {
+                            app.move_command_palette(3);
+                        } else if app.stash_ui.open {
+                            app.stash_ui.move_selection(3);
+                        } else {
+                            match app.current_tab {
+                                Tab::Explorer => {
+                                    if mouse.column >= app.explorer_preview_x {
+                                        app.preview_scroll = app.preview_scroll.saturating_add(3);
+                                    } else {
+                                        let i = app.selected_index().unwrap_or(0);
+                                        if i + 3 < app.files.len() {
+                                            app.list_state.select(Some(i + 3));
+                                            app.update_preview();
+                                            app.preview_scroll = 0;
+                                        } else {
+                                            app.list_state
+                                                .select(Some(app.files.len().saturating_sub(1)));
+                                            app.update_preview();
+                                        }
+                                    }
                                 }
-                            }
-                        }
-                        Tab::Git => {
-                            if app.branch_ui.open {
-                                app.branch_ui.move_selection(3);
-                            } else if mouse.column >= app.git_diff_x {
-                                if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.git.diff_scroll_x = app.git.diff_scroll_x.saturating_add(4);
-                                } else if app.git.selected_entry().is_some_and(|e| e.is_conflict) {
-                                    app.conflict_ui.scroll_y =
-                                        app.conflict_ui.scroll_y.saturating_add(3);
-                                } else {
-                                    app.git.diff_scroll_y = app.git.diff_scroll_y.saturating_add(3);
+                                Tab::Git => {
+                                    if app.branch_ui.open {
+                                        app.branch_ui.move_selection(3);
+                                    } else if mouse.column >= app.git_diff_x {
+                                        if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                                            app.git.diff_scroll_x =
+                                                app.git.diff_scroll_x.saturating_add(4);
+                                        } else if app
+                                            .git
+                                            .selected_entry()
+                                            .is_some_and(|e| e.is_conflict)
+                                        {
+                                            app.conflict_ui.scroll_y =
+                                                app.conflict_ui.scroll_y.saturating_add(3);
+                                        } else {
+                                            app.git.diff_scroll_y =
+                                                app.git.diff_scroll_y.saturating_add(3);
+                                        }
+                                    } else {
+                                        let i = app.git.list_state.selected().unwrap_or(0);
+                                        let next =
+                                            (i + 3).min(app.git.filtered.len().saturating_sub(1));
+                                        if app.git.filtered.is_empty() {
+                                            app.git.list_state.select(None);
+                                        } else {
+                                            app.git.select_filtered(next, &app.current_path);
+                                        }
+                                    }
                                 }
-                            } else {
-                                let i = app.git.list_state.selected().unwrap_or(0);
-                                let next = (i + 3).min(app.git.filtered.len().saturating_sub(1));
-                                if app.git.filtered.is_empty() {
-                                    app.git.list_state.select(None);
-                                } else {
-                                    app.git.select_filtered(next, &app.current_path);
-                                }
-                            }
-                        }
-                        Tab::Log => {
-                            let files_mode = app.log_ui.detail_mode == LogDetailMode::Files
-                                && app.log_ui.subtab != LogSubTab::Commands
-                                && app.log_ui.zoom != LogZoom::List;
+                                Tab::Log => {
+                                    let files_mode = app.log_ui.detail_mode == LogDetailMode::Files
+                                        && app.log_ui.subtab == LogSubTab::History
+                                        && app.log_ui.zoom != LogZoom::List;
 
-                            if app.log_ui.inspect.open {
-                                app.log_ui.inspect.scroll_y =
-                                    app.log_ui.inspect.scroll_y.saturating_add(3);
-                            } else if mouse.column >= app.log_diff_x {
-                                app.log_ui.focus = LogPaneFocus::Diff;
-                                if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.log_ui.diff_scroll_x =
-                                        app.log_ui.diff_scroll_x.saturating_add(4);
-                                } else {
-                                    app.log_ui.diff_scroll_y =
-                                        app.log_ui.diff_scroll_y.saturating_add(3);
-                                }
-                            } else if files_mode && mouse.column >= app.log_files_x {
-                                app.log_ui.focus = LogPaneFocus::Files;
-                                app.move_log_file_selection(3);
-                            } else {
-                                app.log_ui.focus = LogPaneFocus::Commits;
-                                app.move_log_selection(3);
-                            }
-                        }
-                    },
-                    MouseEventKind::ScrollUp => match app.current_tab {
-                        Tab::Explorer => {
-                            if mouse.column >= app.explorer_preview_x {
-                                app.preview_scroll = app.preview_scroll.saturating_sub(3);
-                            } else {
-                                let i = app.selected_index().unwrap_or(0);
-                                if i >= 3 {
-                                    app.list_state.select(Some(i - 3));
-                                    app.update_preview();
-                                    app.preview_scroll = 0;
-                                } else {
-                                    app.list_state.select(Some(0));
-                                    app.update_preview();
+                                    if app.log_ui.inspect.open {
+                                        app.log_ui.inspect.scroll_y =
+                                            app.log_ui.inspect.scroll_y.saturating_add(3);
+                                    } else if mouse.column >= app.log_diff_x {
+                                        app.log_ui.focus = LogPaneFocus::Diff;
+                                        if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                                            app.log_ui.diff_scroll_x =
+                                                app.log_ui.diff_scroll_x.saturating_add(4);
+                                        } else {
+                                            app.log_ui.diff_scroll_y =
+                                                app.log_ui.diff_scroll_y.saturating_add(3);
+                                        }
+                                    } else if files_mode && mouse.column >= app.log_files_x {
+                                        app.log_ui.focus = LogPaneFocus::Files;
+                                        app.move_log_file_selection(3);
+                                    } else {
+                                        app.log_ui.focus = LogPaneFocus::Commits;
+                                        app.move_log_selection(3);
+                                    }
                                 }
                             }
                         }
-                        Tab::Git => {
-                            if app.branch_ui.open {
-                                app.branch_ui.move_selection(-3);
-                            } else if mouse.column >= app.git_diff_x {
-                                if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.git.diff_scroll_x = app.git.diff_scroll_x.saturating_sub(4);
-                                } else if app.git.selected_entry().is_some_and(|e| e.is_conflict) {
-                                    app.conflict_ui.scroll_y =
-                                        app.conflict_ui.scroll_y.saturating_sub(3);
-                                } else {
-                                    app.git.diff_scroll_y = app.git.diff_scroll_y.saturating_sub(3);
+                    }
+                    MouseEventKind::ScrollUp => {
+                        if app.theme_picker.open {
+                            app.move_theme_picker(-3);
+                        } else if app.command_palette.open {
+                            app.move_command_palette(-3);
+                        } else if app.stash_ui.open {
+                            app.stash_ui.move_selection(-3);
+                        } else {
+                            match app.current_tab {
+                                Tab::Explorer => {
+                                    if mouse.column >= app.explorer_preview_x {
+                                        app.preview_scroll = app.preview_scroll.saturating_sub(3);
+                                    } else {
+                                        let i = app.selected_index().unwrap_or(0);
+                                        if i >= 3 {
+                                            app.list_state.select(Some(i - 3));
+                                            app.update_preview();
+                                            app.preview_scroll = 0;
+                                        } else {
+                                            app.list_state.select(Some(0));
+                                            app.update_preview();
+                                        }
+                                    }
                                 }
-                            } else {
-                                let i = app.git.list_state.selected().unwrap_or(0);
-                                if i >= 3 {
-                                    app.git.select_filtered(i - 3, &app.current_path);
-                                } else if !app.git.filtered.is_empty() {
-                                    app.git.select_filtered(0, &app.current_path);
+                                Tab::Git => {
+                                    if app.branch_ui.open {
+                                        app.branch_ui.move_selection(-3);
+                                    } else if mouse.column >= app.git_diff_x {
+                                        if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                                            app.git.diff_scroll_x =
+                                                app.git.diff_scroll_x.saturating_sub(4);
+                                        } else if app
+                                            .git
+                                            .selected_entry()
+                                            .is_some_and(|e| e.is_conflict)
+                                        {
+                                            app.conflict_ui.scroll_y =
+                                                app.conflict_ui.scroll_y.saturating_sub(3);
+                                        } else {
+                                            app.git.diff_scroll_y =
+                                                app.git.diff_scroll_y.saturating_sub(3);
+                                        }
+                                    } else {
+                                        let i = app.git.list_state.selected().unwrap_or(0);
+                                        if i >= 3 {
+                                            app.git.select_filtered(i - 3, &app.current_path);
+                                        } else if !app.git.filtered.is_empty() {
+                                            app.git.select_filtered(0, &app.current_path);
+                                        }
+                                    }
                                 }
-                            }
-                        }
-                        Tab::Log => {
-                            let files_mode = app.log_ui.detail_mode == LogDetailMode::Files
-                                && app.log_ui.subtab != LogSubTab::Commands
-                                && app.log_ui.zoom != LogZoom::List;
+                                Tab::Log => {
+                                    let files_mode = app.log_ui.detail_mode == LogDetailMode::Files
+                                        && app.log_ui.subtab == LogSubTab::History
+                                        && app.log_ui.zoom != LogZoom::List;
 
-                            if app.log_ui.inspect.open {
-                                app.log_ui.inspect.scroll_y =
-                                    app.log_ui.inspect.scroll_y.saturating_sub(3);
-                            } else if mouse.column >= app.log_diff_x {
-                                app.log_ui.focus = LogPaneFocus::Diff;
-                                if mouse.modifiers.contains(KeyModifiers::SHIFT) {
-                                    app.log_ui.diff_scroll_x =
-                                        app.log_ui.diff_scroll_x.saturating_sub(4);
-                                } else {
-                                    app.log_ui.diff_scroll_y =
-                                        app.log_ui.diff_scroll_y.saturating_sub(3);
+                                    if app.log_ui.inspect.open {
+                                        app.log_ui.inspect.scroll_y =
+                                            app.log_ui.inspect.scroll_y.saturating_sub(3);
+                                    } else if mouse.column >= app.log_diff_x {
+                                        app.log_ui.focus = LogPaneFocus::Diff;
+                                        if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                                            app.log_ui.diff_scroll_x =
+                                                app.log_ui.diff_scroll_x.saturating_sub(4);
+                                        } else {
+                                            app.log_ui.diff_scroll_y =
+                                                app.log_ui.diff_scroll_y.saturating_sub(3);
+                                        }
+                                    } else if files_mode && mouse.column >= app.log_files_x {
+                                        app.log_ui.focus = LogPaneFocus::Files;
+                                        app.move_log_file_selection(-3);
+                                    } else {
+                                        app.log_ui.focus = LogPaneFocus::Commits;
+                                        app.move_log_selection(-3);
+                                    }
                                 }
-                            } else if files_mode && mouse.column >= app.log_files_x {
-                                app.log_ui.focus = LogPaneFocus::Files;
-                                app.move_log_file_selection(-3);
-                            } else {
-                                app.log_ui.focus = LogPaneFocus::Commits;
-                                app.move_log_selection(-3);
                             }
                         }
-                    },
+                    }
                     MouseEventKind::Down(MouseButton::Left) => {
                         app.handle_click(mouse.row, mouse.column, mouse.modifiers);
                     }
                     MouseEventKind::Down(MouseButton::Right) => {
+                        if app.theme_picker.open {
+                            app.theme_picker.open = false;
+                            continue;
+                        }
+                        if app.command_palette.open {
+                            app.command_palette.open = false;
+                            continue;
+                        }
+                        if app.stash_ui.open {
+                            if app.stash_ui.confirm.is_some() {
+                                app.stash_ui.confirm = None;
+                            } else {
+                                app.close_stash_picker();
+                            }
+                            continue;
+                        }
+
                         app.context_menu = None;
                         app.pending_menu_action = None;
                         app.handle_context_click(mouse.row, mouse.column, mouse.modifiers);
