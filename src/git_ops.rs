@@ -9,6 +9,7 @@ pub struct CommitEntry {
     pub date: String,
     pub author: String,
     pub subject: String,
+    pub decoration: String,
 }
 
 #[derive(Clone, Debug)]
@@ -64,10 +65,12 @@ pub fn list_history(repo_root: &Path, max: usize) -> Result<Vec<CommitEntry>, St
         repo_root,
         &[
             "log",
+            "--no-color",
+            "--decorate=short",
             "--date=short",
             "--max-count",
             max_s.as_str(),
-            "--pretty=format:%H\t%h\t%ad\t%an\t%s",
+            "--pretty=format:%H\t%h\t%ad\t%an\t%s\t%d",
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -77,12 +80,13 @@ pub fn list_history(repo_root: &Path, max: usize) -> Result<Vec<CommitEntry>, St
 
     let mut entries = Vec::new();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let mut it = line.splitn(5, '\t');
+        let mut it = line.splitn(6, '\t');
         let hash = it.next().unwrap_or("").trim().to_string();
         let short = it.next().unwrap_or("").trim().to_string();
         let date = it.next().unwrap_or("").trim().to_string();
         let author = it.next().unwrap_or("").trim().to_string();
         let subject = it.next().unwrap_or("").trim().to_string();
+        let decoration = it.next().unwrap_or("").trim().to_string();
         if hash.is_empty() {
             continue;
         }
@@ -92,6 +96,7 @@ pub fn list_history(repo_root: &Path, max: usize) -> Result<Vec<CommitEntry>, St
             date,
             author,
             subject,
+            decoration,
         });
     }
 

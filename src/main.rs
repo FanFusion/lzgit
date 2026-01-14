@@ -3260,6 +3260,86 @@ fn format_size(size: u64) -> String {
     }
 }
 
+fn git_decoration_spans(decoration: &str, palette: theme::Palette) -> Vec<Span<'static>> {
+    let deco = decoration.trim();
+    if deco.is_empty() {
+        return Vec::new();
+    }
+
+    let mut text = deco;
+    if let Some(stripped) = text.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+        text = stripped;
+    }
+
+    let mut spans = Vec::new();
+    spans.push(Span::raw(" ("));
+
+    let mut first = true;
+    for token in text.split(", ") {
+        if token.is_empty() {
+            continue;
+        }
+        if !first {
+            spans.push(Span::raw(", "));
+        }
+        first = false;
+
+        if let Some(rest) = token.strip_prefix("tag: ") {
+            spans.push(Span::styled(
+                format!("tag: {}", rest),
+                Style::default().fg(palette.accent_secondary),
+            ));
+            continue;
+        }
+
+        if token.starts_with("HEAD") {
+            spans.push(Span::styled(
+                token.to_string(),
+                Style::default()
+                    .fg(palette.accent_primary)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            continue;
+        }
+
+        spans.push(Span::styled(
+            token.to_string(),
+            Style::default().fg(palette.accent_tertiary),
+        ));
+    }
+
+    spans.push(Span::raw(")"));
+    spans
+}
+
+fn log_history_line(e: &git_ops::CommitEntry, palette: theme::Palette) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::styled(
+        format!("{}", e.short),
+        Style::default().fg(palette.fg).add_modifier(Modifier::BOLD),
+    ));
+
+    spans.extend(git_decoration_spans(e.decoration.as_str(), palette));
+
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        e.date.clone(),
+        Style::default().fg(palette.border_inactive),
+    ));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        format!("{}:", e.author),
+        Style::default().fg(palette.fg),
+    ));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        e.subject.clone(),
+        Style::default().fg(palette.fg),
+    ));
+
+    Line::from(spans)
+}
+
 fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
     let mut zones = Vec::new();
     let area = f.area();
@@ -4456,12 +4536,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                         .log_ui
                         .history
                         .iter()
-                        .map(|e| {
-                            ListItem::new(format!(
-                                "{}  {}  {}: {}",
-                                e.short, e.date, e.author, e.subject
-                            ))
-                        })
+                        .map(|e| ListItem::new(log_history_line(e, app.palette)))
                         .collect(),
                     LogSubTab::Reflog => app
                         .log_ui
