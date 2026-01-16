@@ -66,21 +66,42 @@ pub fn staged_diff(repo_root: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-pub fn list_history(repo_root: &Path, max: usize) -> Result<Vec<CommitEntry>, String> {
+pub fn diff_path(repo_root: &Path, path: &str, staged: bool) -> Result<String, String> {
+    let mut args: Vec<&str> = vec!["diff"];
+    if staged {
+        args.push("--cached");
+    }
+    args.push("--");
+    args.push(path);
+
+    let out = run_git(repo_root, &args).map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+pub fn list_history(
+    repo_root: &Path,
+    max: usize,
+    history_ref: Option<&str>,
+) -> Result<Vec<CommitEntry>, String> {
     let max_s = max.to_string();
-    let out = run_git(
-        repo_root,
-        &[
-            "log",
-            "--no-color",
-            "--decorate=short",
-            "--date=short",
-            "--max-count",
-            max_s.as_str(),
-            "--pretty=format:%H\t%h\t%ad\t%an\t%s\t%d",
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+
+    let mut args: Vec<&str> = vec![
+        "log",
+        "--no-color",
+        "--decorate=short",
+        "--date=short",
+        "--max-count",
+        max_s.as_str(),
+        "--pretty=format:%H\t%h\t%ad\t%an\t%s\t%d",
+    ];
+    if let Some(r) = history_ref.map(str::trim).filter(|s| !s.is_empty()) {
+        args.push(r);
+    }
+
+    let out = run_git(repo_root, &args).map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
@@ -707,15 +728,6 @@ pub fn checkout_branch_entry(repo_root: &Path, branch: &BranchEntry) -> Result<(
     )
     .map_err(|e| e.to_string())?;
 
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
-}
-
-pub fn checkout_detached(repo_root: &Path, hash: &str) -> Result<(), String> {
-    let out = run_git(repo_root, &["checkout", "--detach", hash]).map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(())
     } else {

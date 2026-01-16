@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+use unicode_width::UnicodeWidthChar;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GitSection {
@@ -49,6 +50,8 @@ pub struct GitState {
     pub diff_lines: Vec<String>,
     pub diff_scroll_y: u16,
     pub diff_scroll_x: u16,
+    pub diff_generation: u64,
+    pub diff_request_id: u64,
 }
 
 impl GitState {
@@ -68,6 +71,8 @@ impl GitState {
             diff_lines: Vec::new(),
             diff_scroll_y: 0,
             diff_scroll_x: 0,
+            diff_generation: 0,
+            diff_request_id: 0,
         }
     }
 
@@ -84,6 +89,8 @@ impl GitState {
         self.diff_lines.clear();
         self.diff_scroll_y = 0;
         self.diff_scroll_x = 0;
+        self.diff_generation = 0;
+        self.diff_request_id = 0;
 
         let cwd = if current_path.exists() {
             current_path
@@ -197,20 +204,17 @@ impl GitState {
         }
 
         self.update_filtered();
-        self.update_diff_lines(cwd);
     }
 
-    pub fn set_section(&mut self, section: GitSection, current_path: &Path) {
+    pub fn set_section(&mut self, section: GitSection) {
         self.section = section;
         self.update_filtered();
-        self.update_diff_lines(current_path);
     }
 
-    pub fn select_filtered(&mut self, idx: usize, current_path: &Path) {
+    pub fn select_filtered(&mut self, idx: usize) {
         self.list_state.select(Some(idx));
         self.diff_scroll_y = 0;
         self.diff_scroll_x = 0;
-        self.update_diff_lines(current_path);
     }
 
     pub fn selected_entry(&self) -> Option<&GitFileEntry> {
@@ -252,48 +256,6 @@ impl GitState {
             self.list_state.select(None);
         } else if selected >= self.filtered.len() {
             self.list_state.select(Some(0));
-        }
-    }
-
-    fn update_diff_lines(&mut self, current_path: &Path) {
-        self.diff_lines.clear();
-        let Some(entry) = self.selected_entry() else {
-            return;
-        };
-
-        if entry.is_untracked {
-            self.diff_lines.push("Untracked file".to_string());
-            return;
-        }
-
-        let staged = entry.x != ' ' && entry.x != '?';
-        let args: Vec<&str> = if staged {
-            vec!["diff", "--cached", "--", entry.path.as_str()]
-        } else {
-            vec!["diff", "--", entry.path.as_str()]
-        };
-
-        let cwd = if current_path.exists() {
-            current_path
-        } else {
-            Path::new("/")
-        };
-
-        let out = run_git(cwd, &args);
-        let Ok(out) = out else {
-            self.diff_lines.push("Failed to run git diff".to_string());
-            return;
-        };
-        if !out.status.success() {
-            self.diff_lines.push("git diff failed".to_string());
-            return;
-        }
-
-        let text = String::from_utf8_lossy(&out.stdout);
-        if text.trim().is_empty() {
-            self.diff_lines.push("No diff".to_string());
-        } else {
-            self.diff_lines.extend(text.lines().map(|l| l.to_string()));
         }
     }
 
@@ -394,29 +356,93 @@ pub enum GitDiffRow {
     Split { old: GitDiffCell, new: GitDiffCell },
 }
 
+pub fn display_width(s: &str) -> usize {
+    s.chars()
+        .map(|ch| {
+            if ch == '\t' {
+                4
+            } else {
+                UnicodeWidthChar::width(ch).unwrap_or(0)
+            }
+        })
+        .sum()
+}
+
 pub fn slice_chars(s: &str, start: usize, max_len: usize) -> String {
     if max_len == 0 {
         return String::new();
     }
-    s.chars().skip(start).take(max_len).collect()
+
+    let mut out = String::new();
+    let mut col = 0usize;
+    let mut taken = 0usize;
+
+    for ch in s.chars() {
+        let w = if ch == '\t' {
+            4
+        } else {
+            UnicodeWidthChar::width(ch).unwrap_or(0)
+        };
+
+        if col + w <= start {
+            col += w;
+            continue;
+        }
+
+        if taken + w > max_len {
+            break;
+        }
+
+        out.push(ch);
+        taken += w;
+        col += w;
+
+        if taken >= max_len {
+            break;
+        }
+    }
+
+    out
 }
 
 pub fn truncate_to_width(s: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
-    s.chars().take(width).collect()
+
+    let mut out = String::new();
+    let mut wsum = 0usize;
+
+    for ch in s.chars() {
+        let w = if ch == '\t' {
+            4
+        } else {
+            UnicodeWidthChar::width(ch).unwrap_or(0)
+        };
+        if wsum + w > width {
+            break;
+        }
+        out.push(ch);
+        wsum += w;
+        if wsum >= width {
+            break;
+        }
+    }
+
+    out
 }
 
 pub fn pad_to_width(mut s: String, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
-    let len = s.chars().count();
-    if len >= width {
+
+    let w = display_width(&s);
+    if w >= width {
         return truncate_to_width(&s, width);
     }
-    s.push_str(&" ".repeat(width - len));
+
+    s.push_str(&" ".repeat(width - w));
     s
 }
 
@@ -445,6 +471,157 @@ pub fn render_side_by_side_cell(cell: &GitDiffCell, width: usize, scroll_x: usiz
     let code_w = width - GUTTER;
     let code = slice_chars(&cell.text, scroll_x, code_w);
     format!("{}{}", gutter, pad_to_width(code, code_w))
+}
+
+fn wrap_text_to_width(s: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+
+    if display_width(s) <= width {
+        return vec![s.to_string()];
+    }
+
+    let width_of = |ch: char| -> usize {
+        if ch == '\t' {
+            4
+        } else {
+            UnicodeWidthChar::width(ch).unwrap_or(0)
+        }
+    };
+
+    let items: Vec<(usize, char, usize)> = s
+        .char_indices()
+        .map(|(i, ch)| (i, ch, width_of(ch)))
+        .collect();
+
+    let mut out = Vec::new();
+    let mut i = 0usize;
+
+    while i < items.len() {
+        let start_byte = items[i].0;
+        let mut wsum = 0usize;
+        let mut j = i;
+        let mut last_break: Option<usize> = None;
+
+        while j < items.len() {
+            let (_b, ch, w) = items[j];
+
+            if ch.is_whitespace() || matches!(ch, '-' | '/' | ',' | '.' | ';' | ':') {
+                last_break = Some(j + 1);
+            }
+
+            if wsum > 0 && wsum + w > width {
+                break;
+            }
+
+            wsum += w;
+            j += 1;
+
+            if wsum >= width {
+                break;
+            }
+        }
+
+        if j >= items.len() {
+            let seg = s[start_byte..].trim_end_matches(|c: char| c.is_whitespace());
+            out.push(seg.to_string());
+            break;
+        }
+
+        let split_j = last_break.filter(|b| *b > i && *b <= j).unwrap_or(j);
+        let end_byte = items.get(split_j).map(|t| t.0).unwrap_or(s.len());
+        let seg = s[start_byte..end_byte].trim_end_matches(|c: char| c.is_whitespace());
+        out.push(seg.to_string());
+
+        i = split_j;
+        while i < items.len() && items[i].1.is_whitespace() {
+            i += 1;
+        }
+    }
+
+    if out.is_empty() {
+        out.push(String::new());
+    }
+
+    out
+}
+
+pub fn render_side_by_side_cell_lines(
+    cell: &GitDiffCell,
+    width: usize,
+    scroll_x: usize,
+    wrap: bool,
+) -> Vec<String> {
+    const GUTTER: usize = 6;
+
+    if width == 0 {
+        return vec![String::new()];
+    }
+
+    if !wrap {
+        return vec![render_side_by_side_cell(cell, width, scroll_x)];
+    }
+
+    let marker = match cell.kind {
+        GitDiffCellKind::Add => '+',
+        GitDiffCellKind::Delete => '-',
+        _ => ' ',
+    };
+
+    let gutter_first = if let Some(n) = cell.line_no {
+        format!("{:>4}{} ", n, marker)
+    } else {
+        "      ".to_string()
+    };
+
+    if width <= GUTTER {
+        return vec![truncate_to_width(&gutter_first, width)];
+    }
+
+    let code_w = width - GUTTER;
+
+    let indent_bytes = cell
+        .text
+        .char_indices()
+        .take_while(|(_i, c)| c.is_whitespace())
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+
+    let (indent, mut rest) = cell.text.split_at(indent_bytes);
+    let mut indent_w = display_width(indent);
+
+    if indent_w >= code_w {
+        rest = cell.text.as_str();
+        indent_w = 0;
+    }
+
+    let avail = code_w.saturating_sub(indent_w);
+    let mut out = Vec::new();
+
+    let mut lines = wrap_text_to_width(rest, avail);
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    for (idx, seg) in lines.into_iter().enumerate() {
+        let gutter = if idx == 0 {
+            gutter_first.clone()
+        } else {
+            "      ".to_string()
+        };
+
+        let code = if indent_w > 0 {
+            format!("{}{}", indent, seg)
+        } else {
+            seg
+        };
+
+        out.push(format!("{}{}", gutter, pad_to_width(code, code_w)));
+    }
+
+    out
 }
 
 fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
