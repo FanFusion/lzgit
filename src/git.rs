@@ -9,7 +9,6 @@ use unicode_width::UnicodeWidthChar;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GitSection {
-    All,
     Working,
     Staged,
     Untracked,
@@ -61,7 +60,7 @@ impl GitState {
             branch: String::new(),
             ahead: 0,
             behind: 0,
-            section: GitSection::All,
+            section: GitSection::Working,
             entries: Vec::new(),
             filtered: Vec::new(),
             list_state: ListState::default(),
@@ -120,9 +119,9 @@ impl GitState {
             self.list_state.select(None);
             return;
         };
-        self.repo_root = Some(root);
+        self.repo_root = Some(root.clone());
 
-        let out = run_git(cwd, &["status", "--porcelain=v1", "-z", "-b"]);
+        let out = run_git(&root, &["status", "--porcelain=v1", "-z", "-b"]);
         let Ok(out) = out else {
             self.list_state.select(None);
             return;
@@ -230,7 +229,6 @@ impl GitState {
             let staged = e.x != ' ' && e.x != '?';
             let unstaged = e.y != ' ' && e.y != '?';
             let keep = match self.section {
-                GitSection::All => true,
                 GitSection::Working => unstaged && !e.is_conflict && !e.is_untracked,
                 GitSection::Staged => staged && !e.is_conflict && !e.is_untracked,
                 GitSection::Untracked => e.is_untracked,
@@ -241,15 +239,13 @@ impl GitState {
             }
         }
 
-        if self.section == GitSection::All {
-            self.filtered.sort_by(|a, b| {
-                let ea = &self.entries[*a];
-                let eb = &self.entries[*b];
-                let pa = entry_sort_key(ea);
-                let pb = entry_sort_key(eb);
-                pa.cmp(&pb)
-            });
-        }
+        self.filtered.sort_by(|a, b| {
+            let ea = &self.entries[*a];
+            let eb = &self.entries[*b];
+            let pa = entry_sort_key(ea);
+            let pb = entry_sort_key(eb);
+            pa.cmp(&pb)
+        });
 
         let selected = self.list_state.selected().unwrap_or(0);
         if self.filtered.is_empty() {

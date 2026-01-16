@@ -43,7 +43,7 @@ use commit::{CommitFocus, CommitState};
 use conflict::{ConflictFile, ConflictResolution};
 use git::{
     GitDiffCellKind, GitDiffMode, GitDiffRow, GitSection, GitState, build_side_by_side_rows,
-    pad_to_width,
+    display_width, pad_to_width,
 };
 use highlight::{Highlighter, new_highlighter};
 
@@ -120,18 +120,18 @@ mod theme {
         match theme {
             Theme::Mocha => {
                 let bg = Color::Rgb(30, 30, 46);
-                let fg = Color::Rgb(235, 238, 255);
+                let fg = Color::Rgb(248, 248, 255);
                 let accent_primary = Color::Rgb(203, 166, 247);
                 let accent_secondary = Color::Rgb(250, 179, 135);
                 let accent_tertiary = Color::Rgb(137, 180, 250);
                 let border_inactive = Color::Rgb(120, 124, 150);
-                let selection_bg = Color::Rgb(69, 71, 90);
+                let selection_bg = Color::Rgb(78, 82, 110);
                 let dir_color = Color::Rgb(137, 180, 250);
                 let exe_color = Color::Rgb(166, 227, 161);
                 let size_color = Color::Rgb(147, 153, 178);
                 let btn_bg = Color::Rgb(243, 139, 168);
                 let btn_fg = Color::Rgb(24, 24, 37);
-                let menu_bg = Color::Rgb(49, 50, 68);
+                let menu_bg = Color::Rgb(58, 60, 82);
 
                 Palette {
                     bg,
@@ -487,6 +487,8 @@ struct PersistedUiSettings {
 
     #[serde(default)]
     git_side_by_side: Option<bool>,
+    #[serde(default)]
+    git_zoom_diff: Option<bool>,
     #[serde(default)]
     log_side_by_side: Option<bool>,
 
@@ -1182,12 +1184,25 @@ struct LogDiffJobOutput {
     files_selected: Option<usize>,
 }
 
+struct GitRefreshJobOutput {
+    repo_root: Option<PathBuf>,
+    branch: String,
+    ahead: u32,
+    behind: u32,
+    entries: Vec<git::GitFileEntry>,
+}
+
 enum JobResult {
     Git {
         cmd: String,
         result: Result<(), String>,
         refresh: bool,
         close_commit: bool,
+    },
+    GitRefresh {
+        request_id: u64,
+        current_path: PathBuf,
+        result: Result<GitRefreshJobOutput, String>,
     },
     GitDiff {
         request_id: u64,
@@ -1301,6 +1316,8 @@ struct App {
     conflict_ui: ConflictUi,
     commit: CommitState,
     pending_job: Option<PendingJob>,
+    git_refresh_job: Option<PendingJob>,
+    git_refresh_request_id: u64,
     git_diff_job: Option<PendingJob>,
     log_diff_job: Option<PendingJob>,
     discard_confirm: Option<DiscardConfirm>,
@@ -1312,6 +1329,7 @@ struct App {
 
     wrap_diff: bool,
     syntax_highlight: bool,
+    git_zoom_diff: bool,
 
     theme: theme::Theme,
     palette: theme::Palette,
@@ -1365,6 +1383,8 @@ impl App {
             conflict_ui: ConflictUi::new(),
             commit: CommitState::new(),
             pending_job: None,
+            git_refresh_job: None,
+            git_refresh_request_id: 0,
             git_diff_job: None,
             log_diff_job: None,
             discard_confirm: None,
@@ -1376,6 +1396,7 @@ impl App {
 
             wrap_diff: true,
             syntax_highlight: true,
+            git_zoom_diff: false,
 
             theme: theme::Theme::Mocha,
             palette: theme::palette(theme::Theme::Mocha),
@@ -1424,17 +1445,41 @@ impl App {
     }
 
     fn refresh_git_state(&mut self) {
-        self.git.refresh(&self.current_path);
-        self.git_diff_cache.invalidate();
-        self.update_git_operation();
-        self.conflict_ui.reset();
+        self.start_git_refresh_job();
+    }
 
-        if self.git.repo_root.is_some() {
-            if self.git.list_state.selected().is_none() && !self.git.filtered.is_empty() {
-                self.git.list_state.select(Some(0));
-            }
-            self.request_git_diff_update();
+    fn start_git_refresh_job(&mut self) {
+        if self.git_refresh_job.is_some() {
+            self.set_status("Busy");
+            return;
         }
+
+        self.git_refresh_request_id = self.git_refresh_request_id.wrapping_add(1);
+        let request_id = self.git_refresh_request_id;
+        let current_path = self.current_path.clone();
+
+        let (tx, rx) = mpsc::channel();
+        self.git_refresh_job = Some(PendingJob { rx });
+
+        thread::spawn(move || {
+            let result = (|| -> Result<GitRefreshJobOutput, String> {
+                let mut git = GitState::new();
+                git.refresh(&current_path);
+                Ok(GitRefreshJobOutput {
+                    repo_root: git.repo_root,
+                    branch: git.branch,
+                    ahead: git.ahead,
+                    behind: git.behind,
+                    entries: git.entries,
+                })
+            })();
+
+            let _ = tx.send(JobResult::GitRefresh {
+                request_id,
+                current_path,
+                result,
+            });
+        });
     }
 
     fn request_git_diff_update(&mut self) {
@@ -2368,6 +2413,28 @@ impl App {
         }
     }
 
+    fn poll_git_refresh_job(&mut self) {
+        let mut done: Option<JobResult> = None;
+        if let Some(job) = &self.git_refresh_job {
+            match job.rx.try_recv() {
+                Ok(msg) => done = Some(msg),
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    done = Some(JobResult::GitRefresh {
+                        request_id: self.git_refresh_request_id,
+                        current_path: self.current_path.clone(),
+                        result: Err("Git refresh job disconnected".to_string()),
+                    });
+                }
+            }
+        }
+
+        if let Some(msg) = done {
+            self.git_refresh_job = None;
+            self.handle_job_result(msg);
+        }
+    }
+
     fn poll_git_diff_job(&mut self) {
         let mut done: Option<JobResult> = None;
         if let Some(job) = &self.git_diff_job {
@@ -2485,6 +2552,51 @@ impl App {
 
                 if let Some(popup) = popup {
                     self.operation_popup = Some(popup);
+                }
+            }
+            JobResult::GitRefresh {
+                request_id,
+                current_path,
+                result,
+            } => {
+                if request_id != self.git_refresh_request_id {
+                    return;
+                }
+
+                match result {
+                    Ok(out) => {
+                        self.git.repo_root = out.repo_root;
+                        self.git.branch = out.branch;
+                        self.git.ahead = out.ahead;
+                        self.git.behind = out.behind;
+                        self.git.entries = out.entries;
+                        self.git.filtered.clear();
+                        self.git.list_state.select(None);
+                        self.git.selected_paths.clear();
+                        self.git.selection_anchor = None;
+                        let current_section = self.git.section;
+                        self.git.set_section(current_section);
+                        self.update_git_operation();
+
+                        if !self.git.filtered.is_empty() {
+                            self.git.list_state.select(Some(0));
+                            self.request_git_diff_update();
+                        } else {
+                            self.git.diff_lines.clear();
+                            self.git.diff_generation = self.git.diff_generation.wrapping_add(1);
+                            self.git_diff_cache.invalidate();
+                        }
+                    }
+                    Err(e) => {
+                        self.set_status(e);
+                        self.git.diff_lines.clear();
+                        self.git.diff_generation = self.git.diff_generation.wrapping_add(1);
+                        self.git_diff_cache.invalidate();
+                    }
+                }
+
+                if self.current_path == current_path {
+                    self.set_status("Git refreshed");
                 }
             }
             JobResult::GitDiff { request_id, result } => {
@@ -3439,9 +3551,8 @@ impl App {
         if let Some(wrap) = settings.wrap_diff {
             self.wrap_diff = wrap;
         }
-
-        if let Some(h) = settings.syntax_highlight {
-            self.syntax_highlight = h;
+        if let Some(syntax) = settings.syntax_highlight {
+            self.syntax_highlight = syntax;
         }
 
         if let Some(side) = settings.git_side_by_side {
@@ -3450,6 +3561,9 @@ impl App {
             } else {
                 GitDiffMode::Unified
             };
+        }
+        if let Some(z) = settings.git_zoom_diff {
+            self.git_zoom_diff = z;
         }
 
         if let Some(side) = settings.log_side_by_side {
@@ -3480,6 +3594,7 @@ impl App {
             wrap_diff: Some(self.wrap_diff),
             syntax_highlight: Some(self.syntax_highlight),
             git_side_by_side: Some(self.git.diff_mode == GitDiffMode::SideBySide),
+            git_zoom_diff: Some(self.git_zoom_diff),
             log_side_by_side: Some(self.log_ui.diff_mode == GitDiffMode::SideBySide),
             log_zoom: Some(self.log_ui.zoom),
             log_detail_mode: Some(self.log_ui.detail_mode),
@@ -3770,14 +3885,13 @@ impl App {
                 self.current_tab = tab;
                 self.context_menu = None;
                 if tab == Tab::Git {
-                    self.refresh_git_state();
+                    self.start_git_refresh_job();
                 } else if tab == Tab::Log {
                     self.refresh_log_data();
                 }
             }
             AppAction::RefreshGit => {
-                self.refresh_git_state();
-                self.set_status("Git refreshed");
+                self.start_git_refresh_job();
             }
             AppAction::OpenCommandPalette => {
                 self.open_command_palette();
@@ -5106,13 +5220,14 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
     let main_layout = if app.current_tab == Tab::Git {
         let commit_h = if app.commit.open { 11 } else { 1 };
+        let footer_h = if app.git_zoom_diff { 0 } else { 3 };
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),
                 Constraint::Min(0),
                 Constraint::Length(commit_h),
-                Constraint::Length(3),
+                Constraint::Length(footer_h),
             ])
             .split(area)
     } else {
@@ -5313,15 +5428,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             let enabled = app.pending_job.is_none();
 
-            let refresh_x = base_x
-                + (" Repo: ".len()
-                    + repo.len()
-                    + "   ".len()
-                    + "Branch: ".len()
-                    + branch_text.len()
-                    + "   ".len()
-                    + format!("↑{} ↓{}{}  ", app.git.ahead, app.git.behind, op).len())
-                    as u16;
+            let refresh_prefix = format!(
+                " Repo: {}   Branch: {}   ↑{} ↓{}{}  ",
+                repo, branch_text, app.git.ahead, app.git.behind, op
+            );
+            let refresh_x = base_x + display_width(refresh_prefix.as_str()) as u16;
             let refresh_rect = Rect::new(refresh_x, second_row_y, 3, 1);
             if enabled {
                 zones.push(ClickZone {
@@ -5698,22 +5809,27 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         Tab::Git => {
             app.ensure_conflicts_loaded();
 
-            let content_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(32), Constraint::Min(0)])
-                .split(content_area);
+            let (sections_area, files_area, diff_area) = if app.git_zoom_diff {
+                let diff_area = content_area;
+                app.git_diff_x = diff_area.x;
+                (Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0), diff_area)
+            } else {
+                let content_chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Length(32), Constraint::Min(0)])
+                    .split(content_area);
 
-            let left_area = content_chunks[0];
-            let diff_area = content_chunks[1];
-            app.git_diff_x = diff_area.x;
+                let left_area = content_chunks[0];
+                let diff_area = content_chunks[1];
+                app.git_diff_x = diff_area.x;
 
-            let left_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(9), Constraint::Min(0)])
-                .split(left_area);
+                let left_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(9), Constraint::Min(0)])
+                    .split(left_area);
 
-            let sections_area = left_chunks[0];
-            let files_area = left_chunks[1];
+                (left_chunks[0], left_chunks[1], diff_area)
+            };
 
             let sections_block = Block::default()
                 .borders(Borders::ALL)
@@ -5744,10 +5860,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     counts.0 += 1;
                 }
             }
-
-            let all_count = app.git.entries.len();
-            let sections = [
-                (GitSection::All, format!(" All ({}) ", all_count)),
+            let sections: Vec<(GitSection, String)> = vec![
                 (GitSection::Working, format!(" Working ({}) ", counts.0)),
                 (GitSection::Staged, format!(" Staged ({}) ", counts.1)),
                 (GitSection::Untracked, format!(" Untracked ({}) ", counts.2)),
@@ -5832,11 +5945,31 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     ];
 
                     if !dir.is_empty() {
+                        let mut dir_text = format!("{}", dir);
+                        let max_dir = 18usize;
+                        if display_width(dir_text.as_str()) > max_dir {
+                            while !dir_text.is_empty()
+                                && display_width(dir_text.as_str()) > max_dir.saturating_sub(2)
+                            {
+                                if let Some((_, tail)) = dir_text.split_once('/') {
+                                    dir_text = tail.to_string();
+                                } else {
+                                    dir_text.clear();
+                                }
+                            }
+                            if !dir_text.is_empty() {
+                                dir_text = format!("…/{}", dir_text);
+                            } else {
+                                dir_text = "…".to_string();
+                            }
+                        }
+
                         spans.push(Span::styled(
-                            format!("  {}", dir),
+                            format!("  {}", dir_text),
                             Style::default().fg(app.palette.border_inactive),
                         ));
                     }
+
                     if let Some(from) = &e.renamed_from {
                         spans.push(Span::styled(
                             format!(" (from {})", from),
@@ -8593,6 +8726,7 @@ fn main() -> io::Result<()> {
         let mut zones = Vec::new();
         app.tick_pending_menu_action();
         app.poll_pending_job();
+        app.poll_git_refresh_job();
         app.poll_git_diff_job();
         app.poll_log_diff_job();
         app.maybe_expire_status();
@@ -9311,7 +9445,14 @@ fn main() -> io::Result<()> {
                                             {
                                                 app.load_more_log_data();
                                             }
-                                            KeyCode::Char('z') => app.toggle_log_zoom(),
+                                            KeyCode::Char('z') => {
+                                                if app.current_tab == Tab::Git {
+                                                    app.git_zoom_diff = !app.git_zoom_diff;
+                                                    app.save_persisted_ui_settings();
+                                                } else {
+                                                    app.toggle_log_zoom();
+                                                }
+                                            }
                                             KeyCode::Tab => app.cycle_log_focus(),
                                             KeyCode::Char('[') => app.adjust_log_left_width(-2),
                                             KeyCode::Char(']') => app.adjust_log_left_width(2),
