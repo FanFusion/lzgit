@@ -12,7 +12,7 @@ use crossterm::{
 use ratatui::{
     prelude::*,
     widgets::{
-        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
@@ -59,6 +59,7 @@ mod theme {
         GruvboxDarkHard,
         Nord,
         Dracula,
+        Terminal,
     }
 
     impl Theme {
@@ -69,6 +70,7 @@ mod theme {
                 Theme::GruvboxDarkHard => "Gruvbox",
                 Theme::Nord => "Nord",
                 Theme::Dracula => "Dracula",
+                Theme::Terminal => "Terminal",
             }
         }
     }
@@ -91,6 +93,9 @@ mod theme {
         pub diff_add_bg: Color,
         pub diff_del_bg: Color,
         pub diff_hunk_bg: Color,
+        pub diff_add_fg: Color,
+        pub diff_del_fg: Color,
+        pub diff_gutter_fg: Color,
     }
 
     fn tint(base: Color, overlay: Color, alpha: f32) -> Color {
@@ -114,7 +119,7 @@ mod theme {
     }
 
     pub fn palette(theme: Theme) -> Palette {
-        let diff_alpha = 0.14;
+        let diff_alpha = 0.20;
         let hunk_alpha = 0.12;
 
         match theme {
@@ -132,6 +137,9 @@ mod theme {
                 let btn_bg = Color::Rgb(243, 139, 168);
                 let btn_fg = Color::Rgb(24, 24, 37);
                 let menu_bg = Color::Rgb(58, 60, 82);
+                // Soft teal for additions, warm coral for deletions
+                let diff_add_tint = Color::Rgb(148, 226, 213); // Catppuccin teal
+                let diff_del_tint = Color::Rgb(243, 139, 168); // Catppuccin red/pink
 
                 Palette {
                     bg,
@@ -147,9 +155,12 @@ mod theme {
                     btn_bg,
                     btn_fg,
                     menu_bg,
-                    diff_add_bg: tint(bg, exe_color, diff_alpha),
-                    diff_del_bg: tint(bg, btn_bg, diff_alpha),
+                    diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
+                    diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_fg: Color::Rgb(148, 226, 213), // Teal for + sign
+                    diff_del_fg: Color::Rgb(243, 139, 168), // Red/pink for - sign
+                    diff_gutter_fg: Color::Rgb(108, 112, 134), // Muted gray for line numbers
                 }
             }
             Theme::TokyoNightStorm => {
@@ -166,6 +177,8 @@ mod theme {
                 let btn_bg = Color::Rgb(247, 118, 142);
                 let btn_fg = Color::Rgb(24, 24, 37);
                 let menu_bg = Color::Rgb(45, 49, 71);
+                let diff_add_tint = Color::Rgb(115, 218, 202); // Tokyo Night cyan/teal
+                let diff_del_tint = Color::Rgb(247, 118, 142); // Tokyo Night red
 
                 Palette {
                     bg,
@@ -181,9 +194,12 @@ mod theme {
                     btn_bg,
                     btn_fg,
                     menu_bg,
-                    diff_add_bg: tint(bg, exe_color, diff_alpha),
-                    diff_del_bg: tint(bg, btn_bg, diff_alpha),
+                    diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
+                    diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_fg: Color::Rgb(115, 218, 202), // Cyan/teal for + sign
+                    diff_del_fg: Color::Rgb(247, 118, 142), // Red for - sign
+                    diff_gutter_fg: Color::Rgb(86, 95, 137), // Muted gray
                 }
             }
             Theme::GruvboxDarkHard => {
@@ -200,6 +216,8 @@ mod theme {
                 let btn_bg = Color::Rgb(251, 73, 52);
                 let btn_fg = Color::Rgb(29, 32, 33);
                 let menu_bg = Color::Rgb(50, 48, 47);
+                let diff_add_tint = Color::Rgb(142, 192, 124); // Gruvbox aqua/green
+                let diff_del_tint = Color::Rgb(251, 73, 52); // Gruvbox red
 
                 Palette {
                     bg,
@@ -215,9 +233,12 @@ mod theme {
                     btn_bg,
                     btn_fg,
                     menu_bg,
-                    diff_add_bg: tint(bg, exe_color, diff_alpha),
-                    diff_del_bg: tint(bg, btn_bg, diff_alpha),
+                    diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
+                    diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_fg: Color::Rgb(142, 192, 124), // Aqua for + sign
+                    diff_del_fg: Color::Rgb(251, 73, 52), // Red for - sign
+                    diff_gutter_fg: Color::Rgb(146, 131, 116), // Muted gray
                 }
             }
             Theme::Nord => {
@@ -234,6 +255,8 @@ mod theme {
                 let btn_bg = Color::Rgb(191, 97, 106);
                 let btn_fg = Color::Rgb(46, 52, 64);
                 let menu_bg = Color::Rgb(59, 66, 82);
+                let diff_add_tint = Color::Rgb(136, 192, 208); // Nord frost (cyan)
+                let diff_del_tint = Color::Rgb(191, 97, 106); // Nord aurora red
 
                 Palette {
                     bg,
@@ -249,9 +272,12 @@ mod theme {
                     btn_bg,
                     btn_fg,
                     menu_bg,
-                    diff_add_bg: tint(bg, exe_color, diff_alpha),
-                    diff_del_bg: tint(bg, btn_bg, diff_alpha),
+                    diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
+                    diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_fg: Color::Rgb(136, 192, 208), // Frost cyan for + sign
+                    diff_del_fg: Color::Rgb(191, 97, 106), // Aurora red for - sign
+                    diff_gutter_fg: Color::Rgb(76, 86, 106), // Muted gray
                 }
             }
             Theme::Dracula => {
@@ -268,6 +294,8 @@ mod theme {
                 let btn_bg = Color::Rgb(255, 85, 85);
                 let btn_fg = Color::Rgb(40, 42, 54);
                 let menu_bg = Color::Rgb(68, 71, 90);
+                let diff_add_tint = Color::Rgb(139, 233, 253); // Dracula cyan
+                let diff_del_tint = Color::Rgb(255, 121, 198); // Dracula pink
 
                 Palette {
                     bg,
@@ -283,16 +311,60 @@ mod theme {
                     btn_bg,
                     btn_fg,
                     menu_bg,
-                    diff_add_bg: tint(bg, exe_color, diff_alpha),
-                    diff_del_bg: tint(bg, btn_bg, diff_alpha),
+                    diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
+                    diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_fg: Color::Rgb(139, 233, 253), // Cyan for + sign
+                    diff_del_fg: Color::Rgb(255, 121, 198), // Pink for - sign
+                    diff_gutter_fg: Color::Rgb(98, 114, 164), // Muted gray
+                }
+            }
+            Theme::Terminal => {
+                // Clean dark theme inspired by OpenCode - pure grays, high contrast
+                let bg = Color::Rgb(22, 22, 22);
+                let fg = Color::Rgb(212, 212, 212);
+                let accent_primary = Color::Rgb(97, 175, 239); // Bright blue
+                let accent_secondary = Color::Rgb(229, 192, 123); // Orange/gold
+                let accent_tertiary = Color::Rgb(198, 120, 221); // Purple
+                let border_inactive = Color::Rgb(68, 68, 68);
+                let selection_bg = Color::Rgb(55, 55, 55);
+                let dir_color = Color::Rgb(97, 175, 239); // Blue for dirs
+                let exe_color = Color::Rgb(152, 195, 121); // Green for executables
+                let size_color = Color::Rgb(92, 99, 112); // Muted gray
+                let btn_bg = Color::Rgb(224, 108, 117); // Red
+                let btn_fg = Color::Rgb(22, 22, 22);
+                let menu_bg = Color::Rgb(38, 38, 38);
+                let diff_add_tint = Color::Rgb(86, 182, 194); // Cyan/teal
+                let diff_del_tint = Color::Rgb(224, 108, 117); // Warm red/coral
+
+                Palette {
+                    bg,
+                    fg,
+                    accent_primary,
+                    accent_secondary,
+                    accent_tertiary,
+                    border_inactive,
+                    selection_bg,
+                    dir_color,
+                    exe_color,
+                    size_color,
+                    btn_bg,
+                    btn_fg,
+                    menu_bg,
+                    diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
+                    diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
+                    diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_fg: Color::Rgb(86, 182, 194), // Cyan for + sign
+                    diff_del_fg: Color::Rgb(224, 108, 117), // Red for - sign
+                    diff_gutter_fg: Color::Rgb(92, 99, 112), // Muted gray
                 }
             }
         }
     }
 }
 
-const THEME_ORDER: [theme::Theme; 5] = [
+const THEME_ORDER: [theme::Theme; 6] = [
+    theme::Theme::Terminal,
     theme::Theme::Mocha,
     theme::Theme::TokyoNightStorm,
     theme::Theme::GruvboxDarkHard,
@@ -332,6 +404,8 @@ enum AppAction {
     Select(usize),
     SelectGitSection(GitSection),
     SelectGitFile(usize),
+    SelectGitTreeItem(usize),
+    ToggleGitTreeExpand,
     ToggleCommitDrawer,
     FocusCommitMessage,
     GenerateCommitMessage,
@@ -643,7 +717,7 @@ impl LogUi {
             stash_state: ListState::default(),
             command_state: ListState::default(),
 
-            left_width: 56,
+            left_width: 44,
             inspect: InspectUi::new(),
 
             files_state: ListState::default(),
@@ -1359,6 +1433,7 @@ struct App {
     pending_clipboard: Option<String>,
     bookmarks_path: Option<PathBuf>,
     ui_settings_path: Option<PathBuf>,
+    needs_full_redraw: bool,
 }
 
 impl App {
@@ -1431,6 +1506,7 @@ impl App {
             pending_clipboard: None,
             bookmarks_path: bookmarks_file_path(),
             ui_settings_path: ui_settings_file_path(),
+            needs_full_redraw: false,
         };
         app.load_persisted_bookmarks();
         app.load_persisted_ui_settings();
@@ -1496,7 +1572,7 @@ impl App {
             return;
         };
 
-        let Some(entry) = self.git.selected_entry().cloned() else {
+        let Some(entry) = self.git.selected_tree_entry().cloned() else {
             self.git.diff_lines.clear();
             self.git.diff_generation = self.git.diff_generation.wrapping_add(1);
             self.git_diff_cache.invalidate();
@@ -1866,7 +1942,7 @@ impl App {
     }
 
     fn ensure_conflicts_loaded(&mut self) {
-        let Some(entry) = self.git.selected_entry() else {
+        let Some(entry) = self.git.selected_tree_entry() else {
             self.conflict_ui.reset();
             return;
         };
@@ -2563,6 +2639,9 @@ impl App {
                     return;
                 }
 
+                // Remember current selection before refresh
+                let prev_selected_path = self.git.selected_path();
+
                 match result {
                     Ok(out) => {
                         self.git.repo_root = out.repo_root;
@@ -2578,8 +2657,31 @@ impl App {
                         self.git.set_section(current_section);
                         self.update_git_operation();
 
-                        if !self.git.filtered.is_empty() {
-                            self.git.list_state.select(Some(0));
+                        // Clear tree selection before rebuild
+                        self.git.tree_state.select(None);
+
+                        // Rebuild tree view
+                        self.git.build_tree();
+
+                        // Try to restore selection by path (file may have moved sections)
+                        let found = if let Some(ref path) = prev_selected_path {
+                            self.git.select_by_path(path)
+                        } else {
+                            false
+                        };
+
+                        // If not found, select first file
+                        if !found && !self.git.flat_tree.is_empty() {
+                            for (i, item) in self.git.flat_tree.iter().enumerate() {
+                                if item.node_type == git::FlatNodeType::File {
+                                    self.git.tree_state.select(Some(i));
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Update diff for new selection
+                        if self.git.selected_tree_entry().is_some() {
                             self.request_git_diff_update();
                         } else {
                             self.git.diff_lines.clear();
@@ -2750,14 +2852,7 @@ impl App {
                     return;
                 };
 
-                let mut paths: Vec<String> = if self.git.selected_paths.is_empty() {
-                    self.git
-                        .selected_entry()
-                        .map(|e| vec![e.path.clone()])
-                        .unwrap_or_default()
-                } else {
-                    self.git.selected_paths.iter().cloned().collect()
-                };
+                let mut paths: Vec<String> = self.git.selected_tree_paths();
 
                 if paths.is_empty() {
                     self.set_status("No selection");
@@ -2782,14 +2877,7 @@ impl App {
                     return;
                 };
 
-                let paths: Vec<String> = if self.git.selected_paths.is_empty() {
-                    self.git
-                        .selected_entry()
-                        .map(|e| vec![e.path.clone()])
-                        .unwrap_or_default()
-                } else {
-                    self.git.selected_paths.iter().cloned().collect()
-                };
+                let paths: Vec<String> = self.git.selected_tree_paths();
 
                 if paths.is_empty() {
                     self.set_status("No selection");
@@ -2902,14 +2990,7 @@ impl App {
             return;
         }
 
-        let paths: Vec<String> = if self.git.selected_paths.is_empty() {
-            self.git
-                .selected_entry()
-                .map(|e| vec![e.path.clone()])
-                .unwrap_or_default()
-        } else {
-            self.git.selected_paths.iter().cloned().collect()
-        };
+        let paths: Vec<String> = self.git.selected_tree_paths();
 
         if paths.is_empty() {
             self.set_status("No selection");
@@ -3152,7 +3233,7 @@ impl App {
     }
 
     fn mark_conflict_resolved(&mut self) {
-        let Some(entry) = self.git.selected_entry() else {
+        let Some(entry) = self.git.selected_tree_entry() else {
             self.set_status("No selection");
             return;
         };
@@ -3727,15 +3808,36 @@ impl App {
         let editor = env::var("EDITOR").ok().filter(|s| !s.trim().is_empty());
         let cmd = editor.unwrap_or_else(|| "vim".to_string());
 
+        // Properly leave TUI mode
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            crossterm::cursor::Show
+        );
+        let _ = io::stdout().flush();
 
+        // Run editor
         let status = std::process::Command::new(cmd.as_str())
             .arg(file.path.as_os_str())
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .status();
 
-        let _ = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture);
+        // Restore TUI mode - order matters!
         let _ = enable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::Purge),
+            crossterm::cursor::MoveTo(0, 0),
+            crossterm::cursor::Hide,
+            EnableMouseCapture
+        );
+        let _ = io::stdout().flush();
 
         match status {
             Ok(s) if s.success() => self.set_status("Editor closed"),
@@ -3743,6 +3845,8 @@ impl App {
             Err(e) => self.set_status(format!("Editor failed: {}", e)),
         }
 
+        // Request full terminal redraw after editor
+        self.needs_full_redraw = true;
         self.load_files();
         self.update_preview();
     }
@@ -3962,6 +4066,57 @@ impl App {
                     self.git.selected_paths.insert(entry.path.clone());
                     self.git.selection_anchor = Some(idx);
                 }
+            }
+            AppAction::SelectGitTreeItem(idx) => {
+                self.git.select_tree(idx);
+
+                // Handle selection based on item type
+                if let Some(item) = self.git.flat_tree.get(idx) {
+                    use git::FlatNodeType;
+                    match item.node_type {
+                        FlatNodeType::Section | FlatNodeType::Directory => {
+                            // Toggle expand/collapse on click
+                            self.git.toggle_tree_expand();
+                        }
+                        FlatNodeType::File => {
+                            // Handle file selection with modifiers
+                            if let Some(entry_idx) = item.entry_idx {
+                                if let Some(entry) = self.git.entries.get(entry_idx) {
+                                    if modifiers.contains(KeyModifiers::SHIFT) {
+                                        let anchor = self.git.selection_anchor.unwrap_or(idx);
+                                        let (a, b) = if anchor <= idx { (anchor, idx) } else { (idx, anchor) };
+                                        self.git.selected_paths.clear();
+                                        for i in a..=b {
+                                            if let Some(item) = self.git.flat_tree.get(i) {
+                                                if item.node_type == FlatNodeType::File {
+                                                    if let Some(e_idx) = item.entry_idx {
+                                                        if let Some(e) = self.git.entries.get(e_idx) {
+                                                            self.git.selected_paths.insert(e.path.clone());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else if modifiers.contains(KeyModifiers::CONTROL) {
+                                        if self.git.selected_paths.contains(&entry.path) {
+                                            self.git.selected_paths.remove(&entry.path);
+                                        } else {
+                                            self.git.selected_paths.insert(entry.path.clone());
+                                        }
+                                        self.git.selection_anchor = Some(idx);
+                                    } else {
+                                        self.git.selected_paths.clear();
+                                        self.git.selection_anchor = Some(idx);
+                                    }
+                                    self.request_git_diff_update();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            AppAction::ToggleGitTreeExpand => {
+                self.git.toggle_tree_expand();
             }
             AppAction::ToggleCommitDrawer => {
                 self.commit.open = !self.commit.open;
@@ -4435,13 +4590,7 @@ impl App {
     }
 
     fn selected_git_paths(&self) -> Vec<String> {
-        if !self.git.selected_paths.is_empty() {
-            return self.git.selected_paths.iter().cloned().collect();
-        }
-        self.git
-            .selected_entry()
-            .map(|e| vec![e.path.clone()])
-            .unwrap_or_default()
+        self.git.selected_tree_paths()
     }
 
     fn selected_history_entry(&self) -> Option<&git_ops::CommitEntry> {
@@ -5167,27 +5316,25 @@ fn git_decoration_spans(decoration: &str, palette: theme::Palette) -> Vec<Span<'
 
 fn log_history_line(e: &git_ops::CommitEntry, palette: theme::Palette) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(
-        format!("{}", e.short),
-        Style::default().fg(palette.fg).add_modifier(Modifier::BOLD),
-    ));
 
-    spans.extend(git_decoration_spans(e.decoration.as_str(), palette));
-
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        e.date.clone(),
-        Style::default().fg(palette.size_color),
-    ));
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        format!("{}:", e.author),
-        Style::default().fg(palette.fg),
-    ));
-    spans.push(Span::raw(" "));
+    // Subject first - most important info
     spans.push(Span::styled(
         e.subject.clone(),
         Style::default().fg(palette.fg),
+    ));
+
+    // Decoration (tags/branches) if any
+    let dec_spans = git_decoration_spans(e.decoration.as_str(), palette);
+    if !dec_spans.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.extend(dec_spans);
+    }
+
+    // Hash at the end, dimmed
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        e.short.clone(),
+        Style::default().fg(palette.size_color),
     ));
 
     Line::from(spans)
@@ -5196,17 +5343,24 @@ fn log_history_line(e: &git_ops::CommitEntry, palette: theme::Palette) -> Line<'
 fn log_reflog_line(e: &git_ops::ReflogEntry, palette: theme::Palette) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
 
-    spans.push(Span::styled(
-        e.selector.clone(),
-        Style::default().fg(palette.fg).add_modifier(Modifier::BOLD),
-    ));
-
-    spans.extend(git_decoration_spans(e.decoration.as_str(), palette));
-
-    spans.push(Span::raw("  "));
+    // Subject first
     spans.push(Span::styled(
         e.subject.clone(),
         Style::default().fg(palette.fg),
+    ));
+
+    // Decoration if any
+    let dec_spans = git_decoration_spans(e.decoration.as_str(), palette);
+    if !dec_spans.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.extend(dec_spans);
+    }
+
+    // Selector at the end, dimmed
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        e.selector.clone(),
+        Style::default().fg(palette.size_color),
     ));
 
     Line::from(spans)
@@ -5605,6 +5759,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let sidebar_area = content_chunks[0];
             let sidebar_block = Block::default()
                 .borders(Borders::RIGHT)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.border_inactive))
                 .title(" Places ")
                 .title_style(Style::default().fg(app.palette.accent_tertiary));
@@ -5642,7 +5797,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             let list_area = content_chunks[1];
             let list_block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.accent_primary))
                 .title(format!(" Files ({}) ", app.files.len()));
 
@@ -5789,7 +5944,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 };
                 let p_block = Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_set(ratatui::symbols::border::PLAIN)
                     .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(" Preview ");
 
@@ -5809,213 +5964,174 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         Tab::Git => {
             app.ensure_conflicts_loaded();
 
-            let (sections_area, files_area, diff_area) = if app.git_zoom_diff {
+            let (tree_area, diff_area) = if app.git_zoom_diff {
                 let diff_area = content_area;
                 app.git_diff_x = diff_area.x;
-                (Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0), diff_area)
+                (Rect::new(0, 0, 0, 0), diff_area)
             } else {
                 let content_chunks = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([Constraint::Length(32), Constraint::Min(0)])
+                    .constraints([Constraint::Length(40), Constraint::Min(0)])
                     .split(content_area);
 
-                let left_area = content_chunks[0];
+                let tree_area = content_chunks[0];
                 let diff_area = content_chunks[1];
                 app.git_diff_x = diff_area.x;
 
-                let left_chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(9), Constraint::Min(0)])
-                    .split(left_area);
-
-                (left_chunks[0], left_chunks[1], diff_area)
+                (tree_area, diff_area)
             };
 
-            let sections_block = Block::default()
+            // Render tree view
+            let (staged, working, untracked, conflicts) = app.git.section_counts();
+            let total = staged + working + untracked + conflicts;
+            let tree_block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.accent_primary))
-                .title(" Changes ");
-            f.render_widget(sections_block.clone(), sections_area);
+                .title(format!(" Git ({}) ", total));
+            f.render_widget(tree_block.clone(), tree_area);
 
-            let section_inner = sections_area.inner(Margin {
+            let tree_inner = tree_area.inner(Margin {
                 vertical: 1,
                 horizontal: 1,
             });
 
-            let mut counts = (0usize, 0usize, 0usize, 0usize);
-            for e in &app.git.entries {
-                let staged = e.x != ' ' && e.x != '?';
-                let unstaged = e.y != ' ' && e.y != '?';
-                if e.is_conflict {
-                    counts.3 += 1;
-                }
-                if e.is_untracked {
-                    counts.2 += 1;
-                }
-                if staged && !e.is_conflict && !e.is_untracked {
-                    counts.1 += 1;
-                }
-                if unstaged && !e.is_conflict && !e.is_untracked {
-                    counts.0 += 1;
-                }
-            }
-            let sections: Vec<(GitSection, String)> = vec![
-                (GitSection::Working, format!(" Working ({}) ", counts.0)),
-                (GitSection::Staged, format!(" Staged ({}) ", counts.1)),
-                (GitSection::Untracked, format!(" Untracked ({}) ", counts.2)),
-                (GitSection::Conflicts, format!(" Conflicts ({}) ", counts.3)),
-            ];
-
-            for (i, (sec, label)) in sections.iter().enumerate() {
-                if i as u16 >= section_inner.height {
-                    break;
-                }
-                let is_active = app.git.section == *sec;
-                let style = if is_active {
-                    Style::default()
-                        .bg(app.palette.selection_bg)
-                        .add_modifier(Modifier::BOLD)
-                        .fg(app.palette.fg)
-                } else {
-                    Style::default().fg(app.palette.fg)
-                };
-                let rect = Rect::new(
-                    section_inner.x,
-                    section_inner.y + i as u16,
-                    section_inner.width,
-                    1,
-                );
-                f.render_widget(Paragraph::new(label.as_str()).style(style), rect);
-                zones.push(ClickZone {
-                    rect,
-                    action: AppAction::SelectGitSection(*sec),
-                });
-            }
-
-            let files_block = Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(app.palette.border_inactive))
-                .title(" Files ");
-
-            let file_items: Vec<ListItem> = app
+            // Build tree items for rendering
+            let tree_items: Vec<ListItem> = app
                 .git
-                .filtered
+                .flat_tree
                 .iter()
-                .filter_map(|abs| app.git.entries.get(*abs))
-                .map(|e| {
-                    let is_selected = app.git.selected_paths.contains(&e.path);
+                .map(|item| {
+                    use git::FlatNodeType;
+                    let indent = "  ".repeat(item.depth);
 
-                    let status = if e.is_untracked {
-                        "??".to_string()
-                    } else if e.is_conflict {
-                        format!("{}{}", e.x, e.y)
-                    } else {
-                        let staged = e.x != ' ' && e.x != '?';
-                        let unstaged = e.y != ' ' && e.y != '?';
-                        match (staged, unstaged) {
-                            (true, false) => e.x.to_string(),
-                            (false, true) => e.y.to_string(),
-                            (true, true) => format!("{}{}", e.x, e.y),
-                            (false, false) => "".to_string(),
+                    match item.node_type {
+                        FlatNodeType::Section => {
+                            // Section header with expand/collapse and count
+                            let arrow = if item.expanded { "▾" } else { "▸" };
+                            let count = match item.section {
+                                GitSection::Staged => staged,
+                                GitSection::Working => working,
+                                GitSection::Untracked => untracked,
+                                GitSection::Conflicts => conflicts,
+                            };
+                            let label = format!("{}{} {} ({})", indent, arrow, item.name, count);
+                            ListItem::new(Line::from(vec![
+                                Span::styled(label, Style::default()
+                                    .fg(app.palette.accent_secondary)
+                                    .add_modifier(Modifier::BOLD)),
+                            ]))
                         }
-                    };
+                        FlatNodeType::Directory => {
+                            // Directory with expand/collapse
+                            let arrow = if item.expanded { "▾" } else { "▸" };
+                            let label = format!("{}{}  {}/", indent, arrow, item.name);
+                            ListItem::new(Line::from(vec![
+                                Span::styled(label, Style::default().fg(app.palette.dir_color)),
+                            ]))
+                        }
+                        FlatNodeType::File => {
+                            // File entry with status
+                            if let Some(entry_idx) = item.entry_idx {
+                                if let Some(e) = app.git.entries.get(entry_idx) {
+                                    let is_selected = app.git.selected_paths.contains(&e.path);
 
-                    let status_style = match status.as_str() {
-                        "M" => Style::default().fg(app.palette.accent_secondary),
-                        "A" => Style::default().fg(app.palette.exe_color),
-                        "D" => Style::default().fg(app.palette.btn_bg),
-                        "??" => Style::default().fg(app.palette.accent_tertiary),
-                        _ => Style::default().fg(app.palette.fg),
-                    };
+                                    // Determine status code based on section
+                                    let status = match item.section {
+                                        GitSection::Staged => e.x.to_string(),
+                                        GitSection::Working => e.y.to_string(),
+                                        GitSection::Untracked => "?".to_string(),
+                                        GitSection::Conflicts => format!("{}{}", e.x, e.y),
+                                    };
 
-                    let checkbox = if is_selected { "▣ " } else { "□ " };
+                                    let status_style = match status.chars().next().unwrap_or(' ') {
+                                        'M' => Style::default().fg(app.palette.accent_secondary),
+                                        'A' => Style::default().fg(app.palette.exe_color),
+                                        'D' => Style::default().fg(app.palette.btn_bg),
+                                        '?' => Style::default().fg(app.palette.accent_tertiary),
+                                        'U' => Style::default().fg(app.palette.btn_bg),
+                                        _ => Style::default().fg(app.palette.fg),
+                                    };
 
-                    let path = e.path.as_str();
-                    let (dir, base) = match path.rsplit_once('/') {
-                        Some((d, b)) => (d, b),
-                        None => ("", path),
-                    };
+                                    let checkbox = if is_selected { "▣" } else { "□" };
 
-                    let mut spans = vec![
-                        Span::styled(checkbox, Style::default().fg(app.palette.border_inactive)),
-                        Span::styled(format!("{:>2} ", status), status_style),
-                        Span::styled(base.to_string(), Style::default().fg(app.palette.fg)),
-                    ];
+                                    let mut spans = vec![
+                                        Span::raw(indent.clone()),
+                                        Span::styled(format!("{} ", checkbox), Style::default().fg(app.palette.border_inactive)),
+                                        Span::styled(format!("{} ", status), status_style),
+                                        Span::styled(&item.name, Style::default().fg(app.palette.fg)),
+                                    ];
 
-                    if !dir.is_empty() {
-                        let mut dir_text = format!("{}", dir);
-                        let max_dir = 18usize;
-                        if display_width(dir_text.as_str()) > max_dir {
-                            while !dir_text.is_empty()
-                                && display_width(dir_text.as_str()) > max_dir.saturating_sub(2)
-                            {
-                                if let Some((_, tail)) = dir_text.split_once('/') {
-                                    dir_text = tail.to_string();
-                                } else {
-                                    dir_text.clear();
+                                    if let Some(from) = &e.renamed_from {
+                                        let base = from.rsplit('/').next().unwrap_or(from);
+                                        spans.push(Span::styled(
+                                            format!(" <- {}", base),
+                                            Style::default().fg(app.palette.border_inactive),
+                                        ));
+                                    }
+
+                                    let mut list_item = ListItem::new(Line::from(spans));
+                                    if is_selected {
+                                        list_item = list_item.style(Style::default().bg(app.palette.menu_bg));
+                                    }
+                                    return list_item;
                                 }
                             }
-                            if !dir_text.is_empty() {
-                                dir_text = format!("…/{}", dir_text);
-                            } else {
-                                dir_text = "…".to_string();
-                            }
+                            // Fallback
+                            ListItem::new(Line::from(vec![
+                                Span::raw(format!("{}  {}", indent, item.name)),
+                            ]))
                         }
-
-                        spans.push(Span::styled(
-                            format!("  {}", dir_text),
-                            Style::default().fg(app.palette.border_inactive),
-                        ));
                     }
-
-                    if let Some(from) = &e.renamed_from {
-                        spans.push(Span::styled(
-                            format!(" (from {})", from),
-                            Style::default().fg(app.palette.border_inactive),
-                        ));
-                    }
-
-                    let mut item = ListItem::new(Line::from(spans));
-                    if is_selected {
-                        item = item.style(Style::default().bg(app.palette.menu_bg));
-                    }
-                    item
                 })
                 .collect();
 
-            let files_list = List::new(file_items)
-                .block(files_block)
+            let tree_list = List::new(tree_items)
                 .highlight_style(
                     Style::default()
                         .bg(app.palette.selection_bg)
                         .add_modifier(Modifier::BOLD),
                 )
-                .highlight_symbol("▎ ");
+                .highlight_symbol("▎");
 
-            f.render_stateful_widget(files_list, files_area, &mut app.git.list_state.clone());
+            f.render_stateful_widget(tree_list, tree_inner, &mut app.git.tree_state.clone());
 
-            let files_inner = files_area.inner(Margin {
-                vertical: 1,
-                horizontal: 1,
-            });
-            let start_index = app.git.list_state.offset();
-            let end_index = (start_index + files_inner.height as usize).min(app.git.filtered.len());
+            // Add click zones for tree items
+            let start_index = app.git.tree_state.offset();
+            let end_index = (start_index + tree_inner.height as usize).min(app.git.flat_tree.len());
             for (i, idx) in (start_index..end_index).enumerate() {
                 let rect = Rect::new(
-                    files_inner.x,
-                    files_inner.y + i as u16,
-                    files_inner.width,
+                    tree_inner.x,
+                    tree_inner.y + i as u16,
+                    tree_inner.width,
                     1,
                 );
                 zones.push(ClickZone {
                     rect,
-                    action: AppAction::SelectGitFile(idx),
+                    action: AppAction::SelectGitTreeItem(idx),
                 });
             }
 
-            let in_conflict_view = app.git.selected_entry().is_some_and(|e| e.is_conflict);
+            // Scrollbar for tree
+            if app.git.flat_tree.len() > tree_inner.height as usize {
+                let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(Some("▴"))
+                    .end_symbol(Some("▾"))
+                    .track_symbol(Some("│"))
+                    .thumb_symbol("║");
+                let mut scroll_state =
+                    ScrollbarState::new(app.git.flat_tree.len()).position(app.git.tree_state.selected().unwrap_or(0));
+                f.render_stateful_widget(
+                    scrollbar,
+                    tree_area.inner(Margin {
+                        vertical: 1,
+                        horizontal: 0,
+                    }),
+                    &mut scroll_state,
+                );
+            }
+
+            let in_conflict_view = app.git.selected_tree_entry().is_some_and(|e| e.is_conflict);
 
             if in_conflict_view {
                 let title = app
@@ -6027,7 +6143,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                 let block = Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_set(ratatui::symbols::border::PLAIN)
                     .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(title);
                 f.render_widget(block.clone(), diff_area);
@@ -6189,7 +6305,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 };
                 let diff_block = Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_set(ratatui::symbols::border::PLAIN)
                     .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(format!(" Diff ({}) ", mode_label));
 
@@ -6222,7 +6338,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             GitDiffMode::Unified => {
                                 let ext = app
                                     .git
-                                    .selected_entry()
+                                    .selected_tree_entry()
                                     .and_then(|e| std::path::Path::new(e.path.as_str()).extension())
                                     .and_then(|s| s.to_str());
 
@@ -6249,21 +6365,46 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                     }
 
                                     if t.starts_with("diff --git") {
-                                        out.push(Line::from(vec![Span::styled(
-                                            pad_to_width(t.to_string(), content_w),
-                                            Style::default().fg(app.palette.accent_primary),
-                                        )]));
+                                        // Extract clean path from "diff --git a/path b/path"
+                                        let full_path = t
+                                            .strip_prefix("diff --git a/")
+                                            .and_then(|s| s.split(" b/").next())
+                                            .unwrap_or(t);
+                                        // Show filename first, then directory
+                                        let (dir, filename) = match full_path.rfind('/') {
+                                            Some(i) => (&full_path[..i+1], &full_path[i+1..]),
+                                            None => ("", full_path),
+                                        };
+                                        let mut spans = vec![
+                                            Span::styled(
+                                                format!("📄 {}", filename),
+                                                Style::default()
+                                                    .fg(app.palette.accent_primary)
+                                                    .add_modifier(Modifier::BOLD),
+                                            ),
+                                        ];
+                                        if !dir.is_empty() {
+                                            spans.push(Span::styled(
+                                                format!("  {}", dir),
+                                                Style::default().fg(app.palette.border_inactive),
+                                            ));
+                                        }
+                                        out.push(Line::from(spans));
                                         continue;
                                     }
 
+                                    // Skip verbose meta lines (index, ---, +++)
                                     if t.starts_with("index ")
                                         || t.starts_with("--- ")
                                         || t.starts_with("+++ ")
-                                        || t.starts_with("rename ")
                                     {
+                                        continue;
+                                    }
+
+                                    if t.starts_with("rename ") {
                                         out.push(Line::from(vec![Span::styled(
                                             pad_to_width(t.to_string(), content_w),
-                                            Style::default().fg(app.palette.fg),
+                                            Style::default().fg(app.palette.accent_secondary),
                                         )]));
                                         continue;
                                     }
@@ -6322,6 +6463,20 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 let right_w = inner_w.saturating_sub(sep_w).saturating_sub(left_w);
 
                                 let mut out = Vec::new();
+
+                                // If columns are too narrow, show message instead of garbled text
+                                if left_w < 16 {
+                                    out.push(Line::from(vec![Span::styled(
+                                        "Window too narrow for side-by-side view",
+                                        Style::default().fg(app.palette.accent_secondary),
+                                    )]));
+                                    out.push(Line::from(vec![Span::styled(
+                                        "Press 's' to switch to unified mode, or widen the window",
+                                        Style::default().fg(app.palette.border_inactive),
+                                    )]));
+                                    out
+                                } else {
+
                                 let title_style = Style::default()
                                     .fg(app.palette.fg)
                                     .add_modifier(Modifier::BOLD);
@@ -6357,7 +6512,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 if app.syntax_highlight {
                                     let ext = app
                                         .git
-                                        .selected_entry()
+                                        .selected_tree_entry()
                                         .and_then(|e| {
                                             std::path::Path::new(e.path.as_str()).extension()
                                         })
@@ -6367,22 +6522,71 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 }
 
                                 let rows = build_side_by_side_rows(&app.git.diff_lines);
+                                let mut first_file = true;
                                 for row in rows {
                                     match row {
                                         GitDiffRow::Meta(t) => {
-                                            let style = if t.starts_with("@@") {
-                                                Style::default()
-                                                    .fg(app.palette.fg)
-                                                    .bg(app.palette.diff_hunk_bg)
-                                                    .add_modifier(Modifier::BOLD)
-                                            } else if t.starts_with("diff --git") {
-                                                Style::default().fg(app.palette.accent_primary)
-                                            } else {
-                                                Style::default().fg(app.palette.fg)
-                                            };
+                                            // Hunk header with spacing
+                                            if t.starts_with("@@") {
+                                                out.push(Line::from(vec![Span::raw("")]));
+                                                out.push(Line::from(vec![Span::styled(
+                                                    pad_to_width(t, inner_w),
+                                                    Style::default()
+                                                        .fg(app.palette.accent_secondary)
+                                                        .bg(app.palette.diff_hunk_bg)
+                                                        .add_modifier(Modifier::BOLD),
+                                                )]));
+                                                continue;
+                                            }
+
+                                            // File header - show filename first, then directory
+                                            if t.starts_with("diff --git") {
+                                                if !first_file {
+                                                    out.push(Line::from(vec![Span::raw("")]));
+                                                    out.push(Line::from(vec![Span::styled(
+                                                        "─".repeat(inner_w),
+                                                        Style::default().fg(app.palette.border_inactive),
+                                                    )]));
+                                                }
+                                                first_file = false;
+                                                let full_path = t
+                                                    .strip_prefix("diff --git a/")
+                                                    .and_then(|s| s.split(" b/").next())
+                                                    .unwrap_or(t.as_str());
+                                                let (dir, filename) = match full_path.rfind('/') {
+                                                    Some(i) => (&full_path[..i+1], &full_path[i+1..]),
+                                                    None => ("", full_path),
+                                                };
+                                                let mut spans = vec![
+                                                    Span::styled(
+                                                        format!("📄 {}", filename),
+                                                        Style::default()
+                                                            .fg(app.palette.accent_primary)
+                                                            .add_modifier(Modifier::BOLD),
+                                                    ),
+                                                ];
+                                                if !dir.is_empty() {
+                                                    spans.push(Span::styled(
+                                                        format!("  {}", dir),
+                                                        Style::default().fg(app.palette.border_inactive),
+                                                    ));
+                                                }
+                                                out.push(Line::from(spans));
+                                                continue;
+                                            }
+
+                                            // Skip verbose meta lines
+                                            if t.starts_with("index ")
+                                                || t.starts_with("--- ")
+                                                || t.starts_with("+++ ")
+                                            {
+                                                continue;
+                                            }
+
+                                            // Other meta lines (rename, etc.)
                                             out.push(Line::from(vec![Span::styled(
                                                 pad_to_width(t, inner_w),
-                                                style,
+                                                Style::default().fg(app.palette.accent_secondary),
                                             )]));
                                         }
                                         GitDiffRow::Split { old, new } => {
@@ -6453,10 +6657,37 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                                     new_cell.split_at(new_cell.len().min(6));
 
                                                 let mut spans: Vec<Span> = Vec::new();
-                                                spans.push(Span::styled(
-                                                    old_gutter.to_string(),
-                                                    old_style,
-                                                ));
+
+                                                // Render old gutter with colored line number and marker
+                                                if old_gutter.len() >= 5 {
+                                                    let (line_num, marker_space) = old_gutter.split_at(4);
+                                                    let (marker, space) = if marker_space.len() >= 2 {
+                                                        marker_space.split_at(1)
+                                                    } else {
+                                                        (marker_space, "")
+                                                    };
+                                                    // Line number in gray
+                                                    spans.push(Span::styled(
+                                                        line_num.to_string(),
+                                                        Style::default().fg(app.palette.diff_gutter_fg).bg(old_bg),
+                                                    ));
+                                                    // Marker (-) in diff color
+                                                    let marker_fg = if marker.trim() == "-" {
+                                                        app.palette.diff_del_fg
+                                                    } else {
+                                                        app.palette.diff_gutter_fg
+                                                    };
+                                                    spans.push(Span::styled(
+                                                        format!("{}{}", marker, space),
+                                                        Style::default().fg(marker_fg).bg(old_bg),
+                                                    ));
+                                                } else {
+                                                    spans.push(Span::styled(
+                                                        old_gutter.to_string(),
+                                                        Style::default().fg(app.palette.diff_gutter_fg).bg(old_bg),
+                                                    ));
+                                                }
+
                                                 if app.syntax_highlight
                                                     && old.kind != GitDiffCellKind::Empty
                                                     && !old_code.trim().is_empty()
@@ -6481,10 +6712,36 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                                                 spans.push(Span::styled("│", sep_style));
 
-                                                spans.push(Span::styled(
-                                                    new_gutter.to_string(),
-                                                    new_style,
-                                                ));
+                                                // Render new gutter with colored line number and marker
+                                                if new_gutter.len() >= 5 {
+                                                    let (line_num, marker_space) = new_gutter.split_at(4);
+                                                    let (marker, space) = if marker_space.len() >= 2 {
+                                                        marker_space.split_at(1)
+                                                    } else {
+                                                        (marker_space, "")
+                                                    };
+                                                    // Line number in gray
+                                                    spans.push(Span::styled(
+                                                        line_num.to_string(),
+                                                        Style::default().fg(app.palette.diff_gutter_fg).bg(new_bg),
+                                                    ));
+                                                    // Marker (+) in diff color
+                                                    let marker_fg = if marker.trim() == "+" {
+                                                        app.palette.diff_add_fg
+                                                    } else {
+                                                        app.palette.diff_gutter_fg
+                                                    };
+                                                    spans.push(Span::styled(
+                                                        format!("{}{}", marker, space),
+                                                        Style::default().fg(marker_fg).bg(new_bg),
+                                                    ));
+                                                } else {
+                                                    spans.push(Span::styled(
+                                                        new_gutter.to_string(),
+                                                        Style::default().fg(app.palette.diff_gutter_fg).bg(new_bg),
+                                                    ));
+                                                }
+
                                                 if app.syntax_highlight
                                                     && new.kind != GitDiffCellKind::Empty
                                                     && !new_code.trim().is_empty()
@@ -6514,6 +6771,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 }
 
                                 out
+                                }
                             }
                         }
                     };
@@ -6612,13 +6870,20 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             }
 
             let mut x = subtab_area.x;
+            let max_x = subtab_area.x + subtab_area.width;
             for (label, subtab) in [
                 (" History ", LogSubTab::History),
                 (" Reflog ", LogSubTab::Reflog),
                 (" Stash ", LogSubTab::Stash),
-                (" Commands ", LogSubTab::Commands),
+                (" Comm ", LogSubTab::Commands),
             ] {
                 let w = label.len() as u16;
+                // Skip if we've run out of horizontal space
+                if x >= max_x {
+                    break;
+                }
+                // Clip width to not extend past subtab_area
+                let clipped_w = w.min(max_x.saturating_sub(x));
                 let active = app.log_ui.subtab == subtab;
                 let style = if active {
                     Style::default()
@@ -6628,7 +6893,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 } else {
                     Style::default().bg(app.palette.bg).fg(app.palette.fg)
                 };
-                let rect = Rect::new(x, subtab_area.y, w, 1);
+                let rect = Rect::new(x, subtab_area.y, clipped_w, 1);
                 f.render_widget(Paragraph::new(label).style(style), rect);
                 zones.push(ClickZone {
                     rect,
@@ -6682,7 +6947,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                 let list_block = Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_set(ratatui::symbols::border::PLAIN)
                     .border_style(Style::default().fg(border_color))
                     .title(list_title);
 
@@ -6774,9 +7039,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                 let mut diff_view_area = diff_area;
                 if files_mode {
+                    // Use proportional width for sidebar, max 38, min 26
+                    let files_w = (diff_area.width / 3).clamp(26, 38);
                     let chunks = Layout::default()
                         .direction(Direction::Horizontal)
-                        .constraints([Constraint::Length(36), Constraint::Min(0)])
+                        .constraints([Constraint::Length(files_w), Constraint::Min(0)])
                         .split(diff_area);
                     let files_area = chunks[0];
                     diff_view_area = chunks[1];
@@ -6784,28 +7051,101 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     app.log_files_x = files_area.x;
                     app.log_diff_x = diff_view_area.x;
 
+                    // Get selected commit info for sidebar header
+                    let commit_info: Option<(&str, &str, &str)> = app
+                        .log_ui
+                        .history
+                        .get(app.log_ui.history_state.selected().unwrap_or(0))
+                        .map(|e| (e.subject.as_str(), e.short.as_str(), e.author.as_str()));
+
                     let file_block = Block::default()
                         .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
+                        .border_set(ratatui::symbols::border::PLAIN)
                         .border_style(Style::default().fg(app.palette.border_inactive))
                         .title(format!(" Files ({}) ", app.log_ui.files.len()));
+
+                    // Render sidebar block
+                    f.render_widget(file_block.clone(), files_area);
+                    let inner = files_area.inner(Margin { vertical: 1, horizontal: 1 });
+
+                    // Render commit info header, get remaining area for file list
+                    let list_area = if let Some((subject, hash, author)) = commit_info {
+                        let max_w = inner.width as usize;
+                        let subj_display: String = if subject.chars().count() > max_w {
+                            subject.chars().take(max_w.saturating_sub(1)).collect::<String>() + "…"
+                        } else {
+                            subject.to_string()
+                        };
+                        let subject_line = Line::from(vec![Span::styled(
+                            subj_display,
+                            Style::default().fg(app.palette.fg).add_modifier(Modifier::BOLD),
+                        )]);
+                        let meta_line = Line::from(vec![
+                            Span::styled(hash.to_string(), Style::default().fg(app.palette.accent_primary)),
+                            Span::styled(format!(" {}", author), Style::default().fg(app.palette.border_inactive)),
+                        ]);
+                        let sep_line = Line::from(vec![Span::styled(
+                            "─".repeat(max_w),
+                            Style::default().fg(app.palette.border_inactive),
+                        )]);
+                        let header = Paragraph::new(vec![subject_line, meta_line, sep_line]);
+                        f.render_widget(header, Rect::new(inner.x, inner.y, inner.width, 3));
+                        Rect::new(inner.x, inner.y + 3, inner.width, inner.height.saturating_sub(3))
+                    } else {
+                        inner
+                    };
 
                     let file_items: Vec<ListItem> = app
                         .log_ui
                         .files
                         .iter()
                         .map(|f| {
-                            let s = if let Some(old) = f.old_path.as_deref() {
-                                format!("{}  {} -> {}", f.status, old, f.path)
-                            } else {
-                                format!("{}  {}", f.status, f.path)
+                            // Show filename first, then line stats, then directory in gray
+                            let (dir, filename) = match f.path.rfind('/') {
+                                Some(i) => (&f.path[..i+1], &f.path[i+1..]),
+                                None => ("", f.path.as_str()),
                             };
-                            ListItem::new(s)
+                            let status_color = match f.status.as_str() {
+                                "M" => app.palette.accent_secondary,  // Modified
+                                "A" => app.palette.diff_add_fg,       // Added
+                                "D" => app.palette.diff_del_fg,       // Deleted
+                                "R" => app.palette.accent_primary,    // Renamed
+                                _ => app.palette.fg,
+                            };
+                            let mut spans = vec![
+                                Span::styled(format!("{} ", f.status), Style::default().fg(status_color)),
+                                Span::styled(filename.to_string(), Style::default().fg(app.palette.fg)),
+                            ];
+                            // Add line change stats
+                            if let (Some(adds), Some(dels)) = (f.additions, f.deletions) {
+                                spans.push(Span::raw(" "));
+                                if adds > 0 {
+                                    spans.push(Span::styled(
+                                        format!("+{}", adds),
+                                        Style::default().fg(app.palette.diff_add_fg),
+                                    ));
+                                }
+                                if dels > 0 {
+                                    if adds > 0 {
+                                        spans.push(Span::raw(" "));
+                                    }
+                                    spans.push(Span::styled(
+                                        format!("-{}", dels),
+                                        Style::default().fg(app.palette.diff_del_fg),
+                                    ));
+                                }
+                            }
+                            if !dir.is_empty() {
+                                spans.push(Span::styled(
+                                    format!(" {}", dir.trim_end_matches('/')),
+                                    Style::default().fg(app.palette.border_inactive),
+                                ));
+                            }
+                            ListItem::new(Line::from(spans))
                         })
                         .collect();
 
                     let file_list = List::new(file_items)
-                        .block(file_block)
                         .highlight_style(
                             Style::default()
                                 .bg(app.palette.selection_bg)
@@ -6813,17 +7153,14 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                         )
                         .highlight_symbol("▎ ");
 
-                    f.render_stateful_widget(file_list, files_area, &mut app.log_ui.files_state);
+                    f.render_stateful_widget(file_list, list_area, &mut app.log_ui.files_state);
 
                     zones.push(ClickZone {
                         rect: files_area,
                         action: AppAction::LogFocusFiles,
                     });
 
-                    let list_inner = files_area.inner(Margin {
-                        vertical: 1,
-                        horizontal: 1,
-                    });
+                    let list_inner = list_area;
 
                     let items_len = app.log_ui.files.len();
                     let offset = app.log_ui.files_state.offset();
@@ -6858,7 +7195,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                 let diff_block = Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_set(ratatui::symbols::border::PLAIN)
                     .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(diff_title);
 
@@ -6882,6 +7219,13 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 let diff_lines: Vec<Line> = if app.log_diff_cache.key == Some(cache_key) {
                     app.log_diff_cache.lines.clone()
                 } else {
+                    // Separate header lines (before first diff --git) from diff lines
+                    let diff_start = app.log_ui.diff_lines.iter()
+                        .position(|l| l.starts_with("diff --git "))
+                        .unwrap_or(app.log_ui.diff_lines.len());
+                    let header_lines = &app.log_ui.diff_lines[..diff_start];
+                    let diff_only_lines = &app.log_ui.diff_lines[diff_start..];
+
                     let computed: Vec<Line> = match app.log_ui.diff_mode {
                         GitDiffMode::Unified => {
                             let mut out = Vec::new();
@@ -6889,7 +7233,40 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                             let content_w = diff_area.width.saturating_sub(2).max(1) as usize;
 
-                            for l in &app.log_ui.diff_lines {
+                            // Render commit header as styled text
+                            for l in header_lines {
+                                let t = l.as_str();
+                                // Skip separator line
+                                if t.starts_with("─") {
+                                    out.push(Line::from(vec![Span::styled(
+                                        "─".repeat(content_w),
+                                        Style::default().fg(app.palette.border_inactive),
+                                    )]));
+                                    continue;
+                                }
+                                // Subject line (first non-empty)
+                                if out.is_empty() && !t.is_empty() {
+                                    out.push(Line::from(vec![Span::styled(
+                                        t.to_string(),
+                                        Style::default()
+                                            .fg(app.palette.accent_primary)
+                                            .add_modifier(Modifier::BOLD),
+                                    )]));
+                                    continue;
+                                }
+                                // Body/meta lines
+                                out.push(Line::from(vec![Span::styled(
+                                    t.to_string(),
+                                    Style::default().fg(app.palette.fg),
+                                )]));
+                            }
+                            // Add spacing after header if there was content
+                            if !header_lines.is_empty() && !diff_only_lines.is_empty() {
+                                out.push(Line::from(vec![Span::raw("")]));
+                            }
+
+                            let mut first_file = true;
+                            for l in diff_only_lines {
                                 let t = l.as_str();
 
                                 if app.syntax_highlight {
@@ -6901,44 +7278,80 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                     }
                                 }
 
+                                // Hunk header with spacing
                                 if t.starts_with("@@") {
+                                    // Add blank line before hunk for visual separation
+                                    out.push(Line::from(vec![Span::raw("")]));
                                     out.push(Line::from(vec![Span::styled(
                                         pad_to_width(t.to_string(), content_w),
                                         Style::default()
-                                            .fg(app.palette.fg)
+                                            .fg(app.palette.accent_secondary)
                                             .bg(app.palette.diff_hunk_bg)
                                             .add_modifier(Modifier::BOLD),
                                     )]));
                                     continue;
                                 }
 
+                                // File header with separator - show filename first
                                 if t.starts_with("diff --git") {
-                                    out.push(Line::from(vec![Span::styled(
-                                        pad_to_width(t.to_string(), content_w),
-                                        Style::default().fg(app.palette.accent_primary),
-                                    )]));
+                                    // Add blank lines before new file (except first)
+                                    if !first_file {
+                                        out.push(Line::from(vec![Span::raw("")]));
+                                        out.push(Line::from(vec![Span::styled(
+                                            "─".repeat(content_w),
+                                            Style::default().fg(app.palette.border_inactive),
+                                        )]));
+                                    }
+                                    first_file = false;
+                                    let full_path = t
+                                        .strip_prefix("diff --git a/")
+                                        .and_then(|s| s.split(" b/").next())
+                                        .unwrap_or(t);
+                                    let (dir, filename) = match full_path.rfind('/') {
+                                        Some(i) => (&full_path[..i+1], &full_path[i+1..]),
+                                        None => ("", full_path),
+                                    };
+                                    let mut spans = vec![
+                                        Span::styled(
+                                            format!("📄 {}", filename),
+                                            Style::default()
+                                                .fg(app.palette.accent_primary)
+                                                .add_modifier(Modifier::BOLD),
+                                        ),
+                                    ];
+                                    if !dir.is_empty() {
+                                        spans.push(Span::styled(
+                                            format!("  {}", dir),
+                                            Style::default().fg(app.palette.border_inactive),
+                                        ));
+                                    }
+                                    out.push(Line::from(spans));
                                     continue;
                                 }
 
+                                // Skip verbose meta lines
                                 if t.starts_with("index ")
                                     || t.starts_with("--- ")
                                     || t.starts_with("+++ ")
-                                    || t.starts_with("rename ")
                                 {
+                                    continue;
+                                }
+
+                                if t.starts_with("rename ") {
                                     out.push(Line::from(vec![Span::styled(
                                         pad_to_width(t.to_string(), content_w),
-                                        Style::default().fg(app.palette.fg),
+                                        Style::default().fg(app.palette.accent_secondary),
                                     )]));
                                     continue;
                                 }
 
                                 let (prefix, code) =
                                     t.split_at(t.chars().next().map(|c| c.len_utf8()).unwrap_or(0));
-                                let (bg, is_code) = match prefix {
-                                    "+" if !t.starts_with("+++") => (app.palette.diff_add_bg, true),
-                                    "-" if !t.starts_with("---") => (app.palette.diff_del_bg, true),
-                                    " " => (app.palette.bg, true),
-                                    _ => (app.palette.bg, false),
+                                let (bg, prefix_fg, is_code) = match prefix {
+                                    "+" if !t.starts_with("+++") => (app.palette.diff_add_bg, app.palette.diff_add_fg, true),
+                                    "-" if !t.starts_with("---") => (app.palette.diff_del_bg, app.palette.diff_del_fg, true),
+                                    " " => (app.palette.bg, app.palette.diff_gutter_fg, true),
+                                    _ => (app.palette.bg, app.palette.fg, false),
                                 };
 
                                 let fill = content_w.saturating_sub(git::display_width(t));
@@ -6948,7 +7361,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                         let mut line = hl.highlight_diff_code_with_prefix(
                                             prefix,
                                             code,
-                                            Style::default().fg(app.palette.fg),
+                                            Style::default().fg(prefix_fg),
                                             bg,
                                         );
                                         if fill > 0 {
@@ -6959,10 +7372,15 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                         }
                                         out.push(line);
                                     } else {
-                                        out.push(Line::from(vec![Span::styled(
-                                            pad_to_width(t.to_string(), content_w),
-                                            Style::default().fg(app.palette.fg).bg(bg),
-                                        )]));
+                                        // Without syntax highlight, still color the prefix
+                                        let mut spans = vec![
+                                            Span::styled(prefix.to_string(), Style::default().fg(prefix_fg).bg(bg)),
+                                            Span::styled(code.to_string(), Style::default().fg(app.palette.fg).bg(bg)),
+                                        ];
+                                        if fill > 0 {
+                                            spans.push(Span::styled(" ".repeat(fill), Style::default().bg(bg)));
+                                        }
+                                        out.push(Line::from(spans));
                                     }
                                 } else {
                                     out.push(Line::from(vec![Span::styled(
@@ -6975,7 +7393,8 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             out
                         }
                         GitDiffMode::SideBySide => {
-                            let rows = build_side_by_side_rows(&app.log_ui.diff_lines);
+                            // Only pass diff lines to side-by-side parser (not commit header)
+                            let rows = build_side_by_side_rows(diff_only_lines);
                             let mut out = Vec::new();
                             let inner = diff_area.inner(Margin {
                                 vertical: 1,
@@ -6987,6 +7406,51 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 .bg(app.palette.bg);
                             let left_w = total_w.saturating_sub(1) / 2;
                             let right_w = total_w.saturating_sub(1) - left_w;
+
+                            // If columns are too narrow, show message instead of garbled text
+                            if left_w < 16 {
+                                out.push(Line::from(vec![Span::styled(
+                                    "Window too narrow for side-by-side view",
+                                    Style::default().fg(app.palette.accent_secondary),
+                                )]));
+                                out.push(Line::from(vec![Span::styled(
+                                    "Press 's' to switch to unified mode, or widen the window",
+                                    Style::default().fg(app.palette.border_inactive),
+                                )]));
+                                out
+                            } else {
+
+                            // Render commit header as styled text first
+                            for l in header_lines {
+                                let t = l.as_str();
+                                // Separator line
+                                if t.starts_with("─") {
+                                    out.push(Line::from(vec![Span::styled(
+                                        "─".repeat(total_w),
+                                        Style::default().fg(app.palette.border_inactive),
+                                    )]));
+                                    continue;
+                                }
+                                // Subject line (first non-empty)
+                                if out.is_empty() && !t.is_empty() {
+                                    out.push(Line::from(vec![Span::styled(
+                                        t.to_string(),
+                                        Style::default()
+                                            .fg(app.palette.accent_primary)
+                                            .add_modifier(Modifier::BOLD),
+                                    )]));
+                                    continue;
+                                }
+                                // Body/meta lines
+                                out.push(Line::from(vec![Span::styled(
+                                    t.to_string(),
+                                    Style::default().fg(app.palette.fg),
+                                )]));
+                            }
+                            // Add spacing after header
+                            if !header_lines.is_empty() && !diff_only_lines.is_empty() {
+                                out.push(Line::from(vec![Span::raw("")]));
+                            }
 
                             let wrap_cells = app.wrap_diff;
                             let scroll_x = if wrap_cells {
@@ -7007,6 +7471,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                             let mut hl_old: Option<Highlighter> = None;
                             let mut hl_new: Option<Highlighter> = None;
+                            let mut first_file = true;
 
                             for r in rows {
                                 match r {
@@ -7021,19 +7486,67 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                             }
                                         }
 
-                                        let style = if t.starts_with("@@") {
-                                            Style::default()
-                                                .fg(app.palette.fg)
-                                                .bg(app.palette.diff_hunk_bg)
-                                                .add_modifier(Modifier::BOLD)
-                                        } else if t.starts_with("diff --git") {
-                                            Style::default().fg(app.palette.accent_primary)
-                                        } else {
-                                            Style::default().fg(app.palette.border_inactive)
-                                        };
+                                        // Hunk header with spacing
+                                        if t.starts_with("@@") {
+                                            out.push(Line::from(vec![Span::raw("")]));
+                                            out.push(Line::from(vec![Span::styled(
+                                                pad_to_width(t, total_w),
+                                                Style::default()
+                                                    .fg(app.palette.accent_secondary)
+                                                    .bg(app.palette.diff_hunk_bg)
+                                                    .add_modifier(Modifier::BOLD),
+                                            )]));
+                                            continue;
+                                        }
+
+                                        // File header with separator - show filename first
+                                        if t.starts_with("diff --git") {
+                                            if !first_file {
+                                                out.push(Line::from(vec![Span::raw("")]));
+                                                out.push(Line::from(vec![Span::styled(
+                                                    "─".repeat(total_w),
+                                                    Style::default().fg(app.palette.border_inactive),
+                                                )]));
+                                            }
+                                            first_file = false;
+                                            let full_path = t
+                                                .strip_prefix("diff --git a/")
+                                                .and_then(|s| s.split(" b/").next())
+                                                .unwrap_or(t.as_str());
+                                            let (dir, filename) = match full_path.rfind('/') {
+                                                Some(i) => (&full_path[..i+1], &full_path[i+1..]),
+                                                None => ("", full_path),
+                                            };
+                                            let mut spans = vec![
+                                                Span::styled(
+                                                    format!("📄 {}", filename),
+                                                    Style::default()
+                                                        .fg(app.palette.accent_primary)
+                                                        .add_modifier(Modifier::BOLD),
+                                                ),
+                                            ];
+                                            if !dir.is_empty() {
+                                                spans.push(Span::styled(
+                                                    format!("  {}", dir),
+                                                    Style::default().fg(app.palette.border_inactive),
+                                                ));
+                                            }
+                                            out.push(Line::from(spans));
+                                            continue;
+                                        }
+
+                                        // Skip verbose meta lines
+                                        if t.starts_with("index ")
+                                            || t.starts_with("--- ")
+                                            || t.starts_with("+++ ")
+                                        {
+                                            continue;
+                                        }
+
+                                        // Other meta lines (rename, etc.)
                                         out.push(Line::from(vec![Span::styled(
                                             pad_to_width(t, total_w),
-                                            style,
+                                            Style::default().fg(app.palette.accent_secondary),
                                         )]));
                                     }
                                     GitDiffRow::Split { old, new } => {
@@ -7102,10 +7615,35 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                                 new_cell.split_at(new_cell.len().min(6));
 
                                             let mut spans: Vec<Span> = Vec::new();
-                                            spans.push(Span::styled(
-                                                old_gutter.to_string(),
-                                                old_style,
-                                            ));
+
+                                            // Render old gutter with colored line number and marker
+                                            if old_gutter.len() >= 5 {
+                                                let (line_num, marker_space) = old_gutter.split_at(4);
+                                                let (marker, space) = if marker_space.len() >= 2 {
+                                                    marker_space.split_at(1)
+                                                } else {
+                                                    (marker_space, "")
+                                                };
+                                                spans.push(Span::styled(
+                                                    line_num.to_string(),
+                                                    Style::default().fg(app.palette.diff_gutter_fg).bg(old_bg),
+                                                ));
+                                                let marker_fg = if marker.trim() == "-" {
+                                                    app.palette.diff_del_fg
+                                                } else {
+                                                    app.palette.diff_gutter_fg
+                                                };
+                                                spans.push(Span::styled(
+                                                    format!("{}{}", marker, space),
+                                                    Style::default().fg(marker_fg).bg(old_bg),
+                                                ));
+                                            } else {
+                                                spans.push(Span::styled(
+                                                    old_gutter.to_string(),
+                                                    Style::default().fg(app.palette.diff_gutter_fg).bg(old_bg),
+                                                ));
+                                            }
+
                                             if app.syntax_highlight
                                                 && old.kind != GitDiffCellKind::Empty
                                                 && !old_code.trim().is_empty()
@@ -7129,10 +7667,34 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
                                             spans.push(Span::styled("│", sep_style));
 
-                                            spans.push(Span::styled(
-                                                new_gutter.to_string(),
-                                                new_style,
-                                            ));
+                                            // Render new gutter with colored line number and marker
+                                            if new_gutter.len() >= 5 {
+                                                let (line_num, marker_space) = new_gutter.split_at(4);
+                                                let (marker, space) = if marker_space.len() >= 2 {
+                                                    marker_space.split_at(1)
+                                                } else {
+                                                    (marker_space, "")
+                                                };
+                                                spans.push(Span::styled(
+                                                    line_num.to_string(),
+                                                    Style::default().fg(app.palette.diff_gutter_fg).bg(new_bg),
+                                                ));
+                                                let marker_fg = if marker.trim() == "+" {
+                                                    app.palette.diff_add_fg
+                                                } else {
+                                                    app.palette.diff_gutter_fg
+                                                };
+                                                spans.push(Span::styled(
+                                                    format!("{}{}", marker, space),
+                                                    Style::default().fg(marker_fg).bg(new_bg),
+                                                ));
+                                            } else {
+                                                spans.push(Span::styled(
+                                                    new_gutter.to_string(),
+                                                    Style::default().fg(app.palette.diff_gutter_fg).bg(new_bg),
+                                                ));
+                                            }
+
                                             if app.syntax_highlight
                                                 && new.kind != GitDiffCellKind::Empty
                                                 && !new_code.trim().is_empty()
@@ -7161,6 +7723,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             }
 
                             out
+                            }
                         }
                     };
 
@@ -7232,7 +7795,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         if app.commit.open {
             let commit_block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.accent_primary))
                 .title(" Commit ");
             f.render_widget(commit_block.clone(), commit_area);
@@ -7269,7 +7832,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             };
             let input_block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(input_border))
                 .title(" Commit Message ");
 
@@ -7372,6 +7935,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         } else {
             let sep = Block::default()
                 .borders(Borders::TOP)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.border_inactive));
             f.render_widget(sep, commit_area);
 
@@ -7394,6 +7958,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
     let footer_block = Block::default()
         .borders(Borders::TOP)
+        .border_set(ratatui::symbols::border::PLAIN)
         .border_style(Style::default().fg(app.palette.border_inactive));
     f.render_widget(footer_block, footer_area);
 
@@ -7449,7 +8014,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             ));
 
             let enabled = app.pending_job.is_none() && !app.commit.busy && !app.branch_ui.open;
-            let in_conflict_view = app.git.selected_entry().is_some_and(|e| e.is_conflict);
+            let in_conflict_view = app.git.selected_tree_entry().is_some_and(|e| e.is_conflict);
 
             if in_conflict_view {
                 buttons.push((
@@ -7666,7 +8231,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 Rect::new(btn_x, btn_y, available, 1),
             );
         }
-    } else if app.current_tab == Tab::Git && app.git.selected_entry().is_some_and(|e| e.is_conflict)
+    } else if app.current_tab == Tab::Git && app.git.selected_tree_entry().is_some_and(|e| e.is_conflict)
     {
         let hint = "Conflicts: n/p block  o/t/b apply  a stage";
         let used = btn_x.saturating_sub(footer_area.x);
@@ -7750,7 +8315,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_set(ratatui::symbols::border::PLAIN)
             .border_style(Style::default().fg(app.palette.btn_bg))
             .title(" Author ");
         f.render_widget(block.clone(), modal);
@@ -7831,7 +8396,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_set(ratatui::symbols::border::PLAIN)
             .border_style(Style::default().fg(app.palette.accent_primary))
             .title(title);
         f.render_widget(block.clone(), modal);
@@ -7889,7 +8454,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_set(ratatui::symbols::border::PLAIN)
                     .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(" Branches "),
             )
@@ -7981,7 +8546,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.btn_bg))
                 .title(" Uncommitted Changes ");
             f.render_widget(block.clone(), confirm);
@@ -8055,7 +8620,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_set(ratatui::symbols::border::PLAIN)
             .border_style(Style::default().fg(app.palette.accent_primary))
             .title(title);
         f.render_widget(block.clone(), modal);
@@ -8094,7 +8659,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_set(ratatui::symbols::border::PLAIN)
                     .border_style(Style::default().fg(app.palette.border_inactive))
                     .title(format!(" Stashes ({}) ", app.stash_ui.filtered.len())),
             )
@@ -8167,7 +8732,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.btn_bg))
                 .title(" Confirm ");
             f.render_widget(block.clone(), confirm);
@@ -8242,7 +8807,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.btn_bg))
                 .title(" Confirm ");
             f.render_widget(block.clone(), confirm);
@@ -8317,7 +8882,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.accent_secondary))
                 .bg(app.palette.menu_bg);
 
@@ -8370,7 +8935,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.accent_primary))
                 .title(" Menu (Ctrl+P) ");
             f.render_widget(block.clone(), modal);
@@ -8394,7 +8959,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
+                        .border_set(ratatui::symbols::border::PLAIN)
                         .border_style(Style::default().fg(app.palette.border_inactive))
                         .title(" Commands "),
                 )
@@ -8424,7 +8989,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(app.palette.accent_primary))
                 .title(" Select Theme ");
             f.render_widget(block.clone(), modal);
@@ -8452,7 +9017,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
+                        .border_set(ratatui::symbols::border::PLAIN)
                         .border_style(Style::default().fg(app.palette.border_inactive))
                         .title(" Themes "),
                 )
@@ -8488,7 +9053,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_set(ratatui::symbols::border::PLAIN)
             .border_style(Style::default().fg(app.palette.accent_secondary))
             .title(app.log_ui.inspect.title.as_str());
         f.render_widget(block.clone(), modal);
@@ -8564,7 +9129,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             };
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_set(ratatui::symbols::border::PLAIN)
                 .border_style(Style::default().fg(border))
                 .title(popup.title.as_str());
             f.render_widget(block.clone(), modal);
@@ -8625,7 +9190,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_set(ratatui::symbols::border::PLAIN)
             .border_style(Style::default().fg(app.palette.btn_bg))
             .title(title);
         f.render_widget(block.clone(), modal);
@@ -8730,6 +9295,11 @@ fn main() -> io::Result<()> {
         app.poll_git_diff_job();
         app.poll_log_diff_job();
         app.maybe_expire_status();
+        // Force full terminal refresh if needed (e.g., after external editor)
+        if app.needs_full_redraw {
+            app.needs_full_redraw = false;
+            terminal.clear()?;
+        }
         terminal.draw(|f| {
             zones = draw_ui(f, &mut app);
         })?;
@@ -9121,7 +9691,7 @@ fn main() -> io::Result<()> {
                                             KeyCode::Char('n')
                                                 if app
                                                     .git
-                                                    .selected_entry()
+                                                    .selected_tree_entry()
                                                     .is_some_and(|e| e.is_conflict) =>
                                             {
                                                 app.change_conflict_block(1)
@@ -9129,7 +9699,7 @@ fn main() -> io::Result<()> {
                                             KeyCode::Char('p')
                                                 if app
                                                     .git
-                                                    .selected_entry()
+                                                    .selected_tree_entry()
                                                     .is_some_and(|e| e.is_conflict) =>
                                             {
                                                 app.change_conflict_block(-1)
@@ -9137,7 +9707,7 @@ fn main() -> io::Result<()> {
                                             KeyCode::Char('o')
                                                 if app
                                                     .git
-                                                    .selected_entry()
+                                                    .selected_tree_entry()
                                                     .is_some_and(|e| e.is_conflict) =>
                                             {
                                                 app.apply_conflict_resolution(
@@ -9147,7 +9717,7 @@ fn main() -> io::Result<()> {
                                             KeyCode::Char('t')
                                                 if app
                                                     .git
-                                                    .selected_entry()
+                                                    .selected_tree_entry()
                                                     .is_some_and(|e| e.is_conflict) =>
                                             {
                                                 app.apply_conflict_resolution(
@@ -9157,7 +9727,7 @@ fn main() -> io::Result<()> {
                                             KeyCode::Char('b')
                                                 if app
                                                     .git
-                                                    .selected_entry()
+                                                    .selected_tree_entry()
                                                     .is_some_and(|e| e.is_conflict) =>
                                             {
                                                 app.apply_conflict_resolution(
@@ -9167,7 +9737,7 @@ fn main() -> io::Result<()> {
                                             KeyCode::Char('a')
                                                 if app
                                                     .git
-                                                    .selected_entry()
+                                                    .selected_tree_entry()
                                                     .is_some_and(|e| e.is_conflict) =>
                                             {
                                                 app.mark_conflict_resolved()
@@ -9180,40 +9750,54 @@ fn main() -> io::Result<()> {
                                             }
 
                                             KeyCode::Left => {
-                                                app.git.diff_scroll_x =
-                                                    app.git.diff_scroll_x.saturating_sub(4);
+                                                // Collapse or scroll diff
+                                                if let Some(item) = app.git.selected_tree_item() {
+                                                    use git::FlatNodeType;
+                                                    if item.node_type == FlatNodeType::Section || item.node_type == FlatNodeType::Directory {
+                                                        app.git.collapse_tree_item();
+                                                    } else {
+                                                        app.git.diff_scroll_x =
+                                                            app.git.diff_scroll_x.saturating_sub(4);
+                                                    }
+                                                } else {
+                                                    app.git.diff_scroll_x =
+                                                        app.git.diff_scroll_x.saturating_sub(4);
+                                                }
                                             }
                                             KeyCode::Right => {
-                                                app.git.diff_scroll_x =
-                                                    app.git.diff_scroll_x.saturating_add(4);
+                                                // Expand or scroll diff
+                                                if let Some(item) = app.git.selected_tree_item() {
+                                                    use git::FlatNodeType;
+                                                    if item.node_type == FlatNodeType::Section || item.node_type == FlatNodeType::Directory {
+                                                        app.git.expand_tree_item();
+                                                    } else {
+                                                        app.git.diff_scroll_x =
+                                                            app.git.diff_scroll_x.saturating_add(4);
+                                                    }
+                                                } else {
+                                                    app.git.diff_scroll_x =
+                                                        app.git.diff_scroll_x.saturating_add(4);
+                                                }
                                             }
                                             KeyCode::Char('j') | KeyCode::Down => {
-                                                let i = app.git.list_state.selected().unwrap_or(0);
-                                                if i + 1 < app.git.filtered.len() {
-                                                    app.git.select_filtered(i + 1);
-                                                    app.request_git_diff_update();
-                                                }
+                                                app.git.tree_move_down();
+                                                app.request_git_diff_update();
                                             }
                                             KeyCode::Char('k') | KeyCode::Up => {
-                                                let i = app.git.list_state.selected().unwrap_or(0);
-                                                if i > 0 {
-                                                    app.git.select_filtered(i - 1);
-                                                    app.request_git_diff_update();
-                                                }
+                                                app.git.tree_move_up();
+                                                app.request_git_diff_update();
                                             }
                                             KeyCode::Char('g') => {
-                                                if !app.git.filtered.is_empty() {
-                                                    app.git.select_filtered(0);
-                                                    app.request_git_diff_update();
-                                                }
+                                                app.git.tree_goto_first();
+                                                app.request_git_diff_update();
                                             }
                                             KeyCode::Char('G') => {
-                                                if !app.git.filtered.is_empty() {
-                                                    app.git.select_filtered(
-                                                        app.git.filtered.len() - 1,
-                                                    );
-                                                    app.request_git_diff_update();
-                                                }
+                                                app.git.tree_goto_last();
+                                                app.request_git_diff_update();
+                                            }
+                                            KeyCode::Enter => {
+                                                // Toggle expand/collapse for sections/directories
+                                                app.git.toggle_tree_expand();
                                             }
                                             _ => {}
                                         }
@@ -9433,6 +10017,17 @@ fn main() -> io::Result<()> {
                                                 app.log_ui.set_detail_mode(LogDetailMode::Files);
                                                 app.refresh_log_diff();
                                             }
+                                            KeyCode::Char('F')
+                                                if app.log_ui.subtab == LogSubTab::History =>
+                                            {
+                                                // Toggle Files panel visibility
+                                                let next = match app.log_ui.detail_mode {
+                                                    LogDetailMode::Diff => LogDetailMode::Files,
+                                                    LogDetailMode::Files => LogDetailMode::Diff,
+                                                };
+                                                app.log_ui.set_detail_mode(next);
+                                                app.refresh_log_diff();
+                                            }
                                             KeyCode::Char('i') => {
                                                 if app.log_ui.inspect.open {
                                                     app.log_ui.inspect.close();
@@ -9592,7 +10187,7 @@ fn main() -> io::Result<()> {
                                                 app.git.diff_scroll_x.saturating_add(4);
                                         } else if app
                                             .git
-                                            .selected_entry()
+                                            .selected_tree_entry()
                                             .is_some_and(|e| e.is_conflict)
                                         {
                                             app.conflict_ui.scroll_y =
@@ -9678,7 +10273,7 @@ fn main() -> io::Result<()> {
                                                 app.git.diff_scroll_x.saturating_sub(4);
                                         } else if app
                                             .git
-                                            .selected_entry()
+                                            .selected_tree_entry()
                                             .is_some_and(|e| e.is_conflict)
                                         {
                                             app.conflict_ui.scroll_y =
