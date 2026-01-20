@@ -3909,9 +3909,9 @@ impl App {
     fn check_for_updates(&mut self) {
         self.set_status("Checking for updates...");
 
-        // Query crates.io API for latest version
+        // Query GitHub Releases API for latest version
         let result: Result<String, String> = (|| {
-            let resp = ureq::get("https://crates.io/api/v1/crates/lzgit")
+            let resp = ureq::get("https://api.github.com/repos/FanFusion/lzgit/releases/latest")
                 .set("User-Agent", "lzgit")
                 .call()
                 .map_err(|e| format!("Network error: {}", e))?;
@@ -3919,9 +3919,12 @@ impl App {
             let json: serde_json::Value = resp.into_json()
                 .map_err(|e| format!("Parse error: {}", e))?;
 
-            let latest = json["crate"]["max_version"]
+            let tag = json["tag_name"]
                 .as_str()
                 .ok_or("Could not get version")?;
+
+            // Remove 'v' prefix if present
+            let latest = tag.strip_prefix('v').unwrap_or(tag);
 
             Ok(latest.to_string())
         })();
