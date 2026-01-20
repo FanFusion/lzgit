@@ -3479,6 +3479,19 @@ impl App {
                     git_ops::push(&repo_root)
                 });
             }
+            "cargo install lzgit --force" => {
+                self.start_git_job(cmd.to_string(), false, false, move || {
+                    let output = std::process::Command::new("cargo")
+                        .args(["install", "lzgit", "--force"])
+                        .output()
+                        .map_err(|e| e.to_string())?;
+                    if output.status.success() {
+                        Ok(())
+                    } else {
+                        Err(String::from_utf8_lossy(&output.stderr).to_string())
+                    }
+                });
+            }
             _ => {
                 self.set_status("Unknown operation");
             }
