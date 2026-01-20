@@ -38,7 +38,7 @@ This entire project is 100% written by Claude Code. My contributions:
 
 ```bash
 # The AI era way (just ask Claude Code)
-claude "install lzgit from https://github.com/FanFusion/lzgit"
+claude "install lzgit from https://raw.githubusercontent.com/FanFusion/lzgit/main/README.md"
 
 # Pre-built binary (instant)
 cargo binstall lzgit
