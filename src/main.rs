@@ -1114,6 +1114,7 @@ enum CommandId {
     GitPullRebase,
     GitPush,
     OpenBranchPicker,
+    NewBranch,
     OpenAuthorPicker,
     OpenStashPicker,
     ClearGitLog,
@@ -1129,6 +1130,7 @@ const COMMAND_PALETTE_ITEMS: &[(CommandId, &str)] = &[
     (CommandId::SelectTheme, "Select theme…"),
     (CommandId::RefreshGit, "Git: refresh status"),
     (CommandId::OpenBranchPicker, "Checkout branch…"),
+    (CommandId::NewBranch, "Git: new branch…"),
     (CommandId::OpenAuthorPicker, "Filter by author…"),
     (CommandId::OpenStashPicker, "Stash…"),
     (CommandId::GitFetch, "Git: fetch --prune"),
@@ -1539,6 +1541,7 @@ struct App {
 
     // Quick stash confirmation
     quick_stash_confirm: bool,
+    new_branch_input: Option<String>,
 
     context_menu: Option<ContextMenu>,
     pending_menu_action: Option<(usize, bool)>,
@@ -1624,6 +1627,7 @@ impl App {
             auto_refresh: true,
             update_confirm: None,
             quick_stash_confirm: false,
+            new_branch_input: None,
             context_menu: None,
             pending_menu_action: None,
             picker,
@@ -3814,6 +3818,9 @@ impl App {
             CommandId::GitPullRebase => self.start_operation_job("git pull --rebase", true),
             CommandId::GitPush => self.start_operation_job("git push", true),
             CommandId::OpenBranchPicker => self.open_branch_picker(),
+            CommandId::NewBranch => {
+                self.new_branch_input = Some(String::new());
+            }
             CommandId::OpenAuthorPicker => self.open_author_picker(),
             CommandId::OpenStashPicker => self.open_stash_picker(),
             CommandId::ClearGitLog => {
@@ -8834,7 +8841,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     );
                 }
                 Tab::Git => {
-                    let hint = "Ctrl+P menu  T theme  z stash";
+                    let hint = "Ctrl+P menu  T theme  z stash  N new branch";
                     let w = hint.len().min(available as usize) as u16;
                     f.render_widget(
                         Paragraph::new(hint)
@@ -9960,6 +9967,54 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         );
     }
 
+    if let Some(ref input) = app.new_branch_input {
+        let w = area.width.min(50).saturating_sub(2).max(40);
+        let h = 7u16.min(area.height.saturating_sub(2)).max(6);
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let modal = Rect::new(x, y, w, h);
+
+        zones.push(ClickZone {
+            rect: area,
+            action: AppAction::None,
+        });
+
+        f.render_widget(Clear, modal);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(ratatui::symbols::border::PLAIN)
+            .border_style(Style::default().fg(app.palette.accent_primary))
+            .title(" New Branch ");
+        f.render_widget(block.clone(), modal);
+
+        let inner = modal.inner(Margin { vertical: 1, horizontal: 2 });
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
+            .split(inner);
+
+        f.render_widget(
+            Paragraph::new("Enter branch name:").style(Style::default().fg(app.palette.fg)),
+            rows[0],
+        );
+
+        let input_style = Style::default()
+            .fg(app.palette.fg)
+            .bg(app.palette.selection_bg);
+        let display_input = format!("{}_", input);
+        f.render_widget(
+            Paragraph::new(display_input).style(input_style),
+            rows[1],
+        );
+
+        f.render_widget(
+            Paragraph::new("Enter to create · Esc to cancel")
+                .style(Style::default().fg(app.palette.border_inactive)),
+            rows[2],
+        );
+    }
+
     zones
 }
 
@@ -10049,7 +10104,8 @@ fn main() -> io::Result<()> {
                             && !app.command_palette.open
                             && !app.stash_ui.open
                             && app.stash_confirm.is_none()
-                            && !app.branch_ui.open =>
+                            && !app.branch_ui.open
+                            && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Git;
                         app.git.refresh(&app.current_path);
@@ -10061,7 +10117,8 @@ fn main() -> io::Result<()> {
                             && !app.command_palette.open
                             && !app.stash_ui.open
                             && app.stash_confirm.is_none()
-                            && !app.branch_ui.open =>
+                            && !app.branch_ui.open
+                            && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Log;
                         app.refresh_log_data();
@@ -10072,7 +10129,8 @@ fn main() -> io::Result<()> {
                             && !app.command_palette.open
                             && !app.stash_ui.open
                             && app.stash_confirm.is_none()
-                            && !app.branch_ui.open =>
+                            && !app.branch_ui.open
+                            && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Explorer;
                     }
@@ -10104,6 +10162,7 @@ fn main() -> io::Result<()> {
                         app.discard_confirm = None;
                         app.update_confirm = None;
                         app.quick_stash_confirm = false;
+                        app.new_branch_input = None;
                         app.operation_popup = None;
                         app.theme_picker.open = false;
                         app.command_palette.open = false;
@@ -10192,6 +10251,32 @@ fn main() -> io::Result<()> {
                                 }
                                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                                     app.quick_stash_confirm = false;
+                                }
+                                _ => {}
+                            }
+                        } else if app.new_branch_input.is_some() {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    app.new_branch_input = None;
+                                }
+                                KeyCode::Enter => {
+                                    if let Some(name) = app.new_branch_input.take() {
+                                        let name = name.trim();
+                                        if !name.is_empty() {
+                                            let cmd = format!("git checkout -b {}", name);
+                                            app.start_operation_job(&cmd, true);
+                                        }
+                                    }
+                                }
+                                KeyCode::Backspace => {
+                                    if let Some(ref mut input) = app.new_branch_input {
+                                        input.pop();
+                                    }
+                                }
+                                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                    if let Some(ref mut input) = app.new_branch_input {
+                                        input.push(ch);
+                                    }
                                 }
                                 _ => {}
                             }
@@ -10459,6 +10544,9 @@ fn main() -> io::Result<()> {
                                             KeyCode::Char('B') => app.open_branch_picker(),
                                             KeyCode::Char('z') => {
                                                 app.quick_stash_confirm = true;
+                                            }
+                                            KeyCode::Char('N') => {
+                                                app.new_branch_input = Some(String::new());
                                             }
                                             KeyCode::Char('c') => {
                                                 app.commit.open = true;
