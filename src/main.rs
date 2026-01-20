@@ -1602,8 +1602,8 @@ impl App {
             git_zoom_diff: false,
             git_left_width: 40,
 
-            theme: theme::Theme::Mocha,
-            palette: theme::palette(theme::Theme::Mocha),
+            theme: theme::Theme::Terminal,
+            palette: theme::palette(theme::Theme::Terminal),
 
             git_diff_cache: DiffRenderCache::new(),
             log_diff_cache: DiffRenderCache::new(),
