@@ -3487,8 +3487,54 @@ impl App {
                     git_ops::push(&repo_root)
                 });
             }
-            "cargo install lzgit --force" => {
+            _ if cmd.starts_with("update lzgit ") => {
+                let version = cmd.strip_prefix("update lzgit ").unwrap_or("").to_string();
                 self.start_git_job(cmd.to_string(), false, false, move || {
+                    // Try to download pre-built binary first
+                    let platform = if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
+                        "linux-x86_64"
+                    } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
+                        "linux-aarch64"
+                    } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
+                        "macos-x86_64"
+                    } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+                        "macos-aarch64"
+                    } else {
+                        "" // Fall back to cargo install
+                    };
+
+                    if !platform.is_empty() && !version.is_empty() {
+                        let url = format!(
+                            "https://github.com/FanFusion/lzgit/releases/download/v{}/lzgit-{}",
+                            version, platform
+                        );
+
+                        if let Ok(resp) = ureq::get(&url).call() {
+                            if resp.status() == 200 {
+                                use std::io::Read;
+                                let mut bytes = Vec::new();
+                                if resp.into_reader().read_to_end(&mut bytes).is_ok() {
+                                    if let Some(home) = std::env::var_os("HOME") {
+                                        let bin_path = std::path::PathBuf::from(home)
+                                            .join(".cargo/bin/lzgit");
+                                        if std::fs::write(&bin_path, &bytes).is_ok() {
+                                            #[cfg(unix)]
+                                            {
+                                                use std::os::unix::fs::PermissionsExt;
+                                                let _ = std::fs::set_permissions(
+                                                    &bin_path,
+                                                    std::fs::Permissions::from_mode(0o755),
+                                                );
+                                            }
+                                            return Ok(());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Fall back to cargo install
                     let output = std::process::Command::new("cargo")
                         .args(["install", "lzgit", "--force"])
                         .output()
@@ -3899,7 +3945,7 @@ impl App {
         if let Some(new_version) = self.update_confirm.take() {
             self.set_status(&format!("Updating to v{}...", new_version));
             self.update_in_progress = true;
-            self.start_operation_job("cargo install lzgit --force", false);
+            self.start_operation_job(&format!("update lzgit {}", new_version), false);
         }
     }
 
