@@ -1,16 +1,17 @@
 [package]
-name = "tui-explorer-rs"
-version = "0.1.0"
+name = "lzgit"
+version = "0.2.8"
 edition = "2024"
-description = "A modern, fast terminal file explorer with mouse support"
+description = "A modern, fast TUI file explorer with Git integration"
 readme = "README.md"
 license = "MIT"
-keywords = ["tui", "terminal", "file-manager", "explorer", "cli"]
-categories = ["command-line-utilities", "filesystem"]
-repository = "https://github.com/yourusername/tui-explorer-rs"
+keywords = ["tui", "terminal", "git", "file-manager", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+repository = "https://github.com/FanFusion/lzgit"
+authors = ["FanFusion"]
 
 [[bin]]
-name = "te"
+name = "lzgit"
 path = "src/main.rs"
 
 [dependencies]
@@ -28,6 +29,8 @@ ureq = { version = "2.12.1", features = ["json"] }
 
 syntect = { version = "5.2.0", default-features = false, features = ["default-themes", "default-syntaxes", "parsing", "regex-fancy"] }
 unicode-width = "0.2.0"
+portable-pty = "0.8"
+vt100 = "0.15"
 
 [profile.release]
 lto = true

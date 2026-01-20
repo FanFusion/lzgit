@@ -31,6 +31,8 @@ pub struct CommitFileChange {
     pub status: String,
     pub path: String,
     pub old_path: Option<String>,
+    pub additions: Option<u32>,
+    pub deletions: Option<u32>,
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> io::Result<std::process::Output> {
@@ -229,13 +231,15 @@ pub fn stash_drop(repo_root: &Path, selector: &str) -> Result<(), String> {
 }
 
 pub fn show_commit(repo_root: &Path, hash: &str) -> Result<String, String> {
+    // Message first, metadata after - more readable
     let out = run_git(
         repo_root,
         &[
             "show",
             "--no-color",
             "--decorate=short",
-            "--format=fuller",
+            "--format=format:%s%n%n%b%n───────────────────────────────────────%n%h  %an  %ad%d",
+            "--date=short",
             "--stat",
             "--patch",
             hash,
@@ -308,6 +312,8 @@ fn parse_name_status(text: &str) -> Vec<CommitFileChange> {
                 status,
                 path,
                 old_path,
+                additions: None,
+                deletions: None,
             });
         } else {
             let path = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
@@ -318,6 +324,8 @@ fn parse_name_status(text: &str) -> Vec<CommitFileChange> {
                 status,
                 path,
                 old_path: None,
+                additions: None,
+                deletions: None,
             });
         }
     }
@@ -325,37 +333,58 @@ fn parse_name_status(text: &str) -> Vec<CommitFileChange> {
     files
 }
 
+fn parse_numstat(text: &str) -> std::collections::HashMap<String, (u32, u32)> {
+    let mut stats = std::collections::HashMap::new();
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 3 {
+            let adds = parts[0].parse::<u32>().ok();
+            let dels = parts[1].parse::<u32>().ok();
+            let path = parts[2].to_string();
+            if let (Some(a), Some(d)) = (adds, dels) {
+                stats.insert(path, (a, d));
+            }
+        }
+    }
+    stats
+}
+
 pub fn list_commit_files(repo_root: &Path, hash: &str) -> Result<Vec<CommitFileChange>, String> {
     let parents = commit_parents(repo_root, hash)?;
-    if let Some(first_parent) = parents.first() {
-        let out = run_git(
-            repo_root,
-            &["diff", "--no-color", "--name-status", first_parent, hash],
-        )
-        .map_err(|e| e.to_string())?;
-        if !out.status.success() {
-            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-        }
-        return Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)));
-    }
 
-    let out = run_git(
-        repo_root,
-        &[
-            "show",
-            "--no-color",
-            "--format=",
-            "--name-status",
-            "--no-patch",
-            hash,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+    let (name_status_args, numstat_args): (Vec<&str>, Vec<&str>) = if let Some(first_parent) = parents.first() {
+        (
+            vec!["diff", "--no-color", "--name-status", first_parent, hash],
+            vec!["diff", "--no-color", "--numstat", first_parent, hash],
+        )
+    } else {
+        (
+            vec!["show", "--no-color", "--format=", "--name-status", "--no-patch", hash],
+            vec!["show", "--no-color", "--format=", "--numstat", "--no-patch", hash],
+        )
+    };
+
+    // Get name-status
+    let out = run_git(repo_root, &name_status_args).map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
+    let mut files = parse_name_status(&String::from_utf8_lossy(&out.stdout));
 
-    Ok(parse_name_status(&String::from_utf8_lossy(&out.stdout)))
+    // Get numstat for line counts
+    if let Ok(stat_out) = run_git(repo_root, &numstat_args) {
+        if stat_out.status.success() {
+            let stats = parse_numstat(&String::from_utf8_lossy(&stat_out.stdout));
+            for f in &mut files {
+                if let Some((adds, dels)) = stats.get(&f.path) {
+                    f.additions = Some(*adds);
+                    f.deletions = Some(*dels);
+                }
+            }
+        }
+    }
+
+    Ok(files)
 }
 
 pub fn show_commit_file_diff(repo_root: &Path, hash: &str, path: &str) -> Result<String, String> {
@@ -522,6 +551,43 @@ pub fn discard_all_changes_path(repo_root: &Path, path: &str) -> Result<(), Stri
         Ok(())
     } else {
         Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Apply a patch in reverse (revert changes)
+pub fn apply_patch_reverse(repo_root: &Path, patch_content: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    // Debug: write patch to temp file
+    let _ = std::fs::write("/tmp/debug_patch.txt", patch_content);
+
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["apply", "--reverse", "-"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(patch_content.as_bytes())
+            .map_err(|e| e.to_string())?;
+    }
+
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        let _ = std::fs::write("/tmp/debug_patch_result.txt", "SUCCESS");
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let _ = std::fs::write("/tmp/debug_patch_result.txt", format!("FAILED: {}", err));
+        Err(err)
     }
 }
 

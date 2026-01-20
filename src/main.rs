@@ -23,12 +23,15 @@ use std::{
     collections::{BTreeSet, VecDeque},
     env,
     fs::{self},
-    io::{self, Write},
+    io::{self, Read as _, Write},
     path::PathBuf,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 mod branch;
 mod commit;
@@ -377,6 +380,7 @@ enum Tab {
     Explorer,
     Git,
     Log,
+    Terminal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -406,6 +410,8 @@ enum AppAction {
     SelectGitFile(usize),
     SelectGitTreeItem(usize),
     ToggleGitTreeExpand,
+    RevertHunk(usize),
+    RevertBlock(usize),
     ToggleCommitDrawer,
     FocusCommitMessage,
     GenerateCommitMessage,
@@ -504,6 +510,7 @@ enum ContextCommand {
     CopyPath,
     CopyRelPath,
     Rename,
+    Delete,
 
     GitStage,
     GitUnstage,
@@ -540,6 +547,98 @@ struct DiscardConfirm {
 }
 
 #[derive(Clone, Debug)]
+struct DeleteConfirm {
+    path: PathBuf,
+    is_dir: bool,
+}
+
+struct TerminalState {
+    parser: vt100::Parser,
+    pty_writer: Option<Box<dyn Write + Send>>,
+    pty_reader_rx: Option<mpsc::Receiver<Vec<u8>>>,
+    active: bool,
+}
+
+impl TerminalState {
+    fn new() -> Self {
+        Self {
+            parser: vt100::Parser::new(24, 80, 0),
+            pty_writer: None,
+            pty_reader_rx: None,
+            active: false,
+        }
+    }
+
+    fn spawn_shell(&mut self, cols: u16, rows: u16, cwd: &PathBuf) {
+        if self.active {
+            return;
+        }
+
+        let pty_system = NativePtySystem::default();
+        let pair = match pty_system.openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        }) {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+
+        let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.cwd(cwd);
+
+        let _child = match pair.slave.spawn_command(cmd) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        self.parser = vt100::Parser::new(rows, cols, 1000);
+        self.pty_writer = Some(pair.master.take_writer().unwrap());
+
+        // Read PTY output in background thread
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if tx.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        self.pty_reader_rx = Some(rx);
+        self.active = true;
+    }
+
+    fn poll_output(&mut self) {
+        if let Some(rx) = &self.pty_reader_rx {
+            while let Ok(data) = rx.try_recv() {
+                self.parser.process(&data);
+            }
+        }
+    }
+
+    fn write_input(&mut self, data: &[u8]) {
+        if let Some(writer) = &mut self.pty_writer {
+            let _ = writer.write_all(data);
+            let _ = writer.flush();
+        }
+    }
+
+    fn resize(&mut self, cols: u16, rows: u16) {
+        self.parser.set_size(rows, cols);
+    }
+}
+
+#[derive(Clone, Debug)]
 struct GitLogEntry {
     when: Instant,
     cmd: String,
@@ -551,6 +650,8 @@ struct GitLogEntry {
 struct PersistedUiSettings {
     #[serde(default)]
     log_left_width: Option<u16>,
+    #[serde(default)]
+    git_left_width: Option<u16>,
     #[serde(default)]
     theme: Option<theme::Theme>,
 
@@ -1016,6 +1117,8 @@ enum CommandId {
     OpenAuthorPicker,
     OpenStashPicker,
     ClearGitLog,
+    QuickStash,
+    CheckUpdate,
     Quit,
 }
 
@@ -1032,6 +1135,8 @@ const COMMAND_PALETTE_ITEMS: &[(CommandId, &str)] = &[
     (CommandId::GitPullRebase, "Git: pull --rebase"),
     (CommandId::GitPush, "Git: push"),
     (CommandId::ClearGitLog, "Clear git command log"),
+    (CommandId::QuickStash, "Git: stash changes"),
+    (CommandId::CheckUpdate, "Check for updates"),
     (CommandId::Quit, "Quit"),
 ];
 
@@ -1371,7 +1476,8 @@ impl DiffRenderCache {
 }
 
 struct App {
-    current_path: PathBuf,
+    current_path: PathBuf,      // Explorer's current directory (changes with navigation)
+    startup_path: PathBuf,      // Initial directory (fixed, used for Git)
     files: Vec<FileEntry>,
     list_state: ListState,
     preview_scroll: u16,
@@ -1395,15 +1501,18 @@ struct App {
     git_diff_job: Option<PendingJob>,
     log_diff_job: Option<PendingJob>,
     discard_confirm: Option<DiscardConfirm>,
+    delete_confirm: Option<DeleteConfirm>,
     operation_popup: Option<OperationPopup>,
     theme_picker: ThemePickerUi,
     command_palette: CommandPaletteUi,
     git_log: VecDeque<GitLogEntry>,
     log_ui: LogUi,
+    terminal: TerminalState,
 
     wrap_diff: bool,
     syntax_highlight: bool,
     git_zoom_diff: bool,
+    git_left_width: u16,
 
     theme: theme::Theme,
     palette: theme::Palette,
@@ -1419,6 +1528,17 @@ struct App {
     zones: Vec<ClickZone>,
     last_click: Option<(Instant, usize)>,
     bookmarks: Vec<(String, PathBuf)>,
+
+    // Auto-refresh
+    last_dir_check: Instant,
+    dir_mtime: Option<std::time::SystemTime>,
+    auto_refresh: bool,
+
+    // Update confirmation
+    update_confirm: Option<String>, // Some(new_version) when update available
+
+    // Quick stash confirmation
+    quick_stash_confirm: bool,
 
     context_menu: Option<ContextMenu>,
     pending_menu_action: Option<(usize, bool)>,
@@ -1439,7 +1559,8 @@ struct App {
 impl App {
     fn new(start_path: PathBuf, picker: Picker) -> Self {
         let mut app = Self {
-            current_path: start_path,
+            current_path: start_path.clone(),
+            startup_path: start_path,
             files: Vec::new(),
             list_state: ListState::default(),
             preview_scroll: 0,
@@ -1463,15 +1584,18 @@ impl App {
             git_diff_job: None,
             log_diff_job: None,
             discard_confirm: None,
+            delete_confirm: None,
             operation_popup: None,
             theme_picker: ThemePickerUi::new(),
             command_palette: CommandPaletteUi::new(),
             git_log: VecDeque::new(),
             log_ui: LogUi::new(),
+            terminal: TerminalState::new(),
 
             wrap_diff: true,
             syntax_highlight: true,
             git_zoom_diff: false,
+            git_left_width: 40,
 
             theme: theme::Theme::Mocha,
             palette: theme::palette(theme::Theme::Mocha),
@@ -1495,6 +1619,11 @@ impl App {
                 ("Tmp".to_string(), PathBuf::from("/tmp")),
                 ("Bin".to_string(), PathBuf::from("/usr/bin")),
             ],
+            last_dir_check: Instant::now(),
+            dir_mtime: None,
+            auto_refresh: true,
+            update_confirm: None,
+            quick_stash_confirm: false,
             context_menu: None,
             pending_menu_action: None,
             picker,
@@ -1515,8 +1644,12 @@ impl App {
             app.list_state.select(Some(0));
             app.update_preview();
         }
-        app.git.refresh(&app.current_path);
+        app.git.refresh(&app.startup_path);
         app.update_git_operation();
+        // Load diff for initially selected file
+        if app.git.selected_tree_entry().is_some() {
+            app.request_git_diff_update();
+        }
         app
     }
 
@@ -1532,7 +1665,7 @@ impl App {
 
         self.git_refresh_request_id = self.git_refresh_request_id.wrapping_add(1);
         let request_id = self.git_refresh_request_id;
-        let current_path = self.current_path.clone();
+        let startup_path = self.startup_path.clone();
 
         let (tx, rx) = mpsc::channel();
         self.git_refresh_job = Some(PendingJob { rx });
@@ -1540,7 +1673,7 @@ impl App {
         thread::spawn(move || {
             let result = (|| -> Result<GitRefreshJobOutput, String> {
                 let mut git = GitState::new();
-                git.refresh(&current_path);
+                git.refresh(&startup_path);
                 Ok(GitRefreshJobOutput {
                     repo_root: git.repo_root,
                     branch: git.branch,
@@ -1552,7 +1685,7 @@ impl App {
 
             let _ = tx.send(JobResult::GitRefresh {
                 request_id,
-                current_path,
+                current_path: startup_path,
                 result,
             });
         });
@@ -1591,7 +1724,45 @@ impl App {
         self.git_diff_job = Some(PendingJob { rx });
         thread::spawn(move || {
             let result: Result<Vec<String>, String> = if is_untracked {
-                Ok(vec!["Untracked file".to_string()])
+                // For untracked files, read the content and format as a diff
+                let file_path = repo_root.join(&path);
+                if file_path.is_dir() {
+                    // List directory contents for untracked directories
+                    match std::fs::read_dir(&file_path) {
+                        Ok(entries) => {
+                            let mut diff_lines = vec![
+                                format!("Untracked directory: {}/", path),
+                                "".to_string(),
+                            ];
+                            for entry in entries.filter_map(|e| e.ok()) {
+                                let name = entry.file_name().to_string_lossy().to_string();
+                                let prefix = if entry.path().is_dir() { "  " } else { "  + " };
+                                diff_lines.push(format!("{}{}", prefix, name));
+                            }
+                            Ok(diff_lines)
+                        }
+                        Err(e) => Ok(vec![format!("Cannot read directory: {}", e)]),
+                    }
+                } else {
+                    match std::fs::read_to_string(&file_path) {
+                        Ok(content) => {
+                            let lines: Vec<&str> = content.lines().collect();
+                            let line_count = lines.len();
+                            let mut diff_lines = vec![
+                                format!("diff --git a/{} b/{}", path, path),
+                                "new file mode 100644".to_string(),
+                                "--- /dev/null".to_string(),
+                                format!("+++ b/{}", path),
+                                format!("@@ -0,0 +1,{} @@", line_count),
+                            ];
+                            for line in lines {
+                                diff_lines.push(format!("+{}", line));
+                            }
+                            Ok(diff_lines)
+                        }
+                        Err(e) => Ok(vec![format!("Cannot read file: {}", e)]),
+                    }
+                }
             } else {
                 match git_ops::diff_path(&repo_root, path.as_str(), staged) {
                     Ok(text) => {
@@ -2707,8 +2878,8 @@ impl App {
                 }
 
                 match result {
-                    Ok(lines) => self.git.diff_lines = lines,
-                    Err(e) => self.git.diff_lines = vec![e],
+                    Ok(lines) => self.git.set_diff_lines(lines),
+                    Err(e) => self.git.set_diff_lines(vec![e]),
                 }
 
                 self.git.diff_generation = self.git.diff_generation.wrapping_add(1);
@@ -3123,6 +3294,133 @@ impl App {
         });
     }
 
+    fn show_delete_confirm(&mut self) {
+        let Some(file) = self.selected_file().cloned() else {
+            self.set_status("No selection");
+            return;
+        };
+        self.delete_confirm = Some(DeleteConfirm {
+            path: file.path.clone(),
+            is_dir: file.is_dir,
+        });
+    }
+
+    fn confirm_delete(&mut self) {
+        let Some(confirm) = self.delete_confirm.take() else {
+            return;
+        };
+
+        let result = if confirm.is_dir {
+            fs::remove_dir_all(&confirm.path)
+        } else {
+            fs::remove_file(&confirm.path)
+        };
+
+        match result {
+            Ok(_) => {
+                let name = confirm.path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| confirm.path.display().to_string());
+                self.set_status(format!("Deleted: {}", name));
+                self.load_files();
+            }
+            Err(e) => {
+                self.set_status(format!("Delete failed: {}", e));
+            }
+        }
+    }
+
+    fn revert_hunk(&mut self, hunk_idx: usize) {
+        if self.pending_job.is_some() {
+            self.set_status("Busy");
+            return;
+        }
+
+        let Some(repo_root) = self.git.repo_root.clone() else {
+            self.set_status("Not a git repository");
+            return;
+        };
+
+        let Some(hunk) = self.git.diff_hunks.get(hunk_idx) else {
+            self.set_status("Invalid hunk");
+            return;
+        };
+
+        // Build patch content from hunk lines
+        let patch_content = hunk.lines.join("\n") + "\n";
+
+        self.start_git_job("revert hunk".to_string(), true, false, move || {
+            git_ops::apply_patch_reverse(&repo_root, &patch_content)
+        });
+    }
+
+    fn revert_block(&mut self, block_idx: usize) {
+        let Some(repo_root) = self.git.repo_root.clone() else {
+            self.set_status("Not a git repository");
+            return;
+        };
+
+        let Some(block) = self.git.change_blocks.get(block_idx).cloned() else {
+            self.set_status("Invalid block");
+            return;
+        };
+
+        // Direct file manipulation: replace new_lines with old_lines
+        let file_path = repo_root.join(&block.file_path);
+        let new_start = block.new_start as usize;
+        let new_lines = block.new_lines.clone();
+        let old_lines = block.old_lines.clone();
+
+        // Read the file
+        let content = match std::fs::read_to_string(&file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_status(format!("Failed to read file: {}", e));
+                return;
+            }
+        };
+
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Calculate the range to replace (1-indexed to 0-indexed)
+        let start_idx = new_start.saturating_sub(1);
+        let end_idx = start_idx + new_lines.len();
+
+        if end_idx > lines.len() {
+            self.set_status("Line numbers out of range");
+            return;
+        }
+
+        // Build new content: lines before + old_lines + lines after
+        let mut new_content = String::new();
+        for line in &lines[..start_idx] {
+            new_content.push_str(line);
+            new_content.push('\n');
+        }
+        for line in &old_lines {
+            new_content.push_str(line);
+            new_content.push('\n');
+        }
+        for line in &lines[end_idx..] {
+            new_content.push_str(line);
+            new_content.push('\n');
+        }
+
+        // Handle trailing newline
+        if !content.ends_with('\n') && new_content.ends_with('\n') {
+            new_content.pop();
+        }
+
+        // Write the file
+        if let Err(e) = std::fs::write(&file_path, &new_content) {
+            self.set_status(format!("Failed to write file: {}", e));
+            return;
+        }
+
+        self.set_status("Reverted");
+        self.refresh_git_state();
+    }
+
     fn start_operation_job(&mut self, cmd: &str, refresh: bool) {
         let Some(repo_root) = self.git.repo_root.clone() else {
             self.set_status("Not a git repository");
@@ -3323,6 +3621,38 @@ impl App {
         }
         self.preview_scroll = 0;
         self.update_preview();
+        // Update directory modification time
+        self.dir_mtime = fs::metadata(&self.current_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+    }
+
+    fn check_auto_refresh(&mut self) {
+        if !self.auto_refresh {
+            return;
+        }
+        // Only check every second
+        if self.last_dir_check.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.last_dir_check = Instant::now();
+
+        // Get current mtime of directory
+        let current_mtime = fs::metadata(&self.current_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
+        // If mtime changed, refresh
+        if current_mtime != self.dir_mtime {
+            let selected_name = self.selected_file().map(|f| f.name.clone());
+            self.load_files();
+            // Try to restore selection
+            if let Some(name) = selected_name {
+                if let Some(idx) = self.files.iter().position(|f| f.name == name) {
+                    self.list_state.select(Some(idx));
+                }
+            }
+        }
     }
 
     fn selected_index(&self) -> Option<usize> {
@@ -3492,7 +3822,55 @@ impl App {
                 self.log_ui.diff_lines.clear();
                 self.set_status("Commands cleared");
             }
+            CommandId::QuickStash => {
+                self.start_operation_job("git stash", true);
+            }
+            CommandId::CheckUpdate => {
+                self.check_for_updates();
+            }
             CommandId::Quit => self.should_quit = true,
+        }
+    }
+
+    fn check_for_updates(&mut self) {
+        self.set_status("Checking for updates...");
+
+        // Query crates.io API for latest version
+        let result: Result<String, String> = (|| {
+            let resp = ureq::get("https://crates.io/api/v1/crates/lzgit")
+                .set("User-Agent", "lzgit")
+                .call()
+                .map_err(|e| format!("Network error: {}", e))?;
+
+            let json: serde_json::Value = resp.into_json()
+                .map_err(|e| format!("Parse error: {}", e))?;
+
+            let latest = json["crate"]["max_version"]
+                .as_str()
+                .ok_or("Could not get version")?;
+
+            Ok(latest.to_string())
+        })();
+
+        match result {
+            Ok(latest) => {
+                if latest == VERSION {
+                    self.set_status(&format!("You're up to date! (v{})", VERSION));
+                } else {
+                    // Show update confirmation dialog
+                    self.update_confirm = Some(latest);
+                }
+            }
+            Err(e) => {
+                self.set_status(&format!("Update check failed: {}", e));
+            }
+        }
+    }
+
+    fn confirm_update(&mut self) {
+        if let Some(new_version) = self.update_confirm.take() {
+            self.set_status(&format!("Updating to v{}...", new_version));
+            self.start_operation_job("cargo install lzgit --force", false);
         }
     }
 
@@ -3624,6 +4002,9 @@ impl App {
         if let Some(w) = settings.log_left_width {
             self.log_ui.left_width = w.clamp(32, 90);
         }
+        if let Some(w) = settings.git_left_width {
+            self.git_left_width = w.clamp(32, 90);
+        }
 
         if let Some(theme) = settings.theme {
             self.set_theme(theme);
@@ -3671,6 +4052,7 @@ impl App {
 
         let settings = PersistedUiSettings {
             log_left_width: Some(self.log_ui.left_width),
+            git_left_width: Some(self.git_left_width),
             theme: Some(self.theme),
             wrap_diff: Some(self.wrap_diff),
             syntax_highlight: Some(self.syntax_highlight),
@@ -4118,6 +4500,12 @@ impl App {
             AppAction::ToggleGitTreeExpand => {
                 self.git.toggle_tree_expand();
             }
+            AppAction::RevertHunk(hunk_idx) => {
+                self.revert_hunk(hunk_idx);
+            }
+            AppAction::RevertBlock(block_idx) => {
+                self.revert_block(block_idx);
+            }
             AppAction::ToggleCommitDrawer => {
                 self.commit.open = !self.commit.open;
                 if self.commit.open {
@@ -4396,6 +4784,7 @@ impl App {
                 }
 
                 options.push((" ✏️  Rename (TODO) ".to_string(), ContextCommand::Rename));
+                options.push((" 🗑️  Delete ".to_string(), ContextCommand::Delete));
 
                 if self.git.repo_root.is_some() {
                     options.push((
@@ -4490,6 +4879,7 @@ impl App {
                     let _ = entry;
                 }
             },
+            Tab::Terminal => return, // No context menu for terminal
         }
 
         self.context_menu = Some(ContextMenu {
@@ -4559,6 +4949,7 @@ impl App {
                     self.save_persisted_bookmarks();
                 }
                 ContextCommand::Rename => {}
+                ContextCommand::Delete => self.show_delete_confirm(),
                 ContextCommand::GitStage => self.handle_git_footer(GitFooterAction::Stage),
                 ContextCommand::GitUnstage => self.handle_git_footer(GitFooterAction::Unstage),
                 ContextCommand::GitToggleStage => self.toggle_stage_for_selection(),
@@ -4893,6 +5284,12 @@ impl App {
         self.log_ui.left_width = next as u16;
     }
 
+    fn adjust_git_left_width(&mut self, delta: i16) {
+        let cur = self.git_left_width as i16;
+        let next = (cur + delta).clamp(32, 90);
+        self.git_left_width = next as u16;
+    }
+
     fn copy_selected_git_path(&mut self, absolute: bool) {
         let paths = self.selected_git_paths();
         let Some(first) = paths.first() else {
@@ -4969,7 +5366,7 @@ impl App {
                 vec![p]
             }
             Tab::Git => self.selected_git_paths(),
-            Tab::Log => {
+            Tab::Log | Tab::Terminal => {
                 self.set_status("Not available here");
                 return;
             }
@@ -5416,6 +5813,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         (" Git ", Tab::Git),
         (" History ", Tab::Log),
         (" Explorer ", Tab::Explorer),
+        (" Terminal ", Tab::Terminal),
     ] {
         let width = label.len() as u16;
         let is_active = app.current_tab == tab;
@@ -5744,6 +6142,14 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 Rect::new(base_x, second_row_y, width, 1),
             );
         }
+        Tab::Terminal => {
+            // Show terminal title
+            let title = " Terminal (shell) ";
+            f.render_widget(
+                Paragraph::new(title).style(Style::default().fg(app.palette.accent_secondary)),
+                Rect::new(top_bar.x + 2, second_row_y, title.len() as u16, 1),
+            );
+        }
     }
     match app.current_tab {
         Tab::Explorer => {
@@ -5971,7 +6377,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             } else {
                 let content_chunks = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([Constraint::Length(40), Constraint::Min(0)])
+                    .constraints([Constraint::Length(app.git_left_width), Constraint::Min(0)])
                     .split(content_area);
 
                 let tree_area = content_chunks[0];
@@ -6016,9 +6422,15 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                 GitSection::Conflicts => conflicts,
                             };
                             let label = format!("{}{} {} ({})", indent, arrow, item.name, count);
+                            // Conflicts section gets red/warning color
+                            let section_color = if item.section == GitSection::Conflicts {
+                                app.palette.diff_del_fg
+                            } else {
+                                app.palette.accent_secondary
+                            };
                             ListItem::new(Line::from(vec![
                                 Span::styled(label, Style::default()
-                                    .fg(app.palette.accent_secondary)
+                                    .fg(section_color)
                                     .add_modifier(Modifier::BOLD)),
                             ]))
                         }
@@ -6044,13 +6456,18 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                         GitSection::Conflicts => format!("{}{}", e.x, e.y),
                                     };
 
-                                    let status_style = match status.chars().next().unwrap_or(' ') {
-                                        'M' => Style::default().fg(app.palette.accent_secondary),
-                                        'A' => Style::default().fg(app.palette.exe_color),
-                                        'D' => Style::default().fg(app.palette.btn_bg),
-                                        '?' => Style::default().fg(app.palette.accent_tertiary),
-                                        'U' => Style::default().fg(app.palette.btn_bg),
-                                        _ => Style::default().fg(app.palette.fg),
+                                    // Conflict files get red styling
+                                    let status_style = if item.section == GitSection::Conflicts {
+                                        Style::default().fg(app.palette.diff_del_fg)
+                                    } else {
+                                        match status.chars().next().unwrap_or(' ') {
+                                            'M' => Style::default().fg(app.palette.accent_secondary),
+                                            'A' => Style::default().fg(app.palette.exe_color),
+                                            'D' => Style::default().fg(app.palette.btn_bg),
+                                            '?' => Style::default().fg(app.palette.accent_tertiary),
+                                            'U' => Style::default().fg(app.palette.btn_bg),
+                                            _ => Style::default().fg(app.palette.fg),
+                                        }
                                     };
 
                                     let checkbox = if is_selected { "▣" } else { "□" };
@@ -6814,6 +7231,70 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 }
 
                 f.render_widget(diff_para, diff_area);
+
+                // Render revert buttons for visible changes
+                let diff_inner = diff_area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 1,
+                });
+                let scroll_y = app.git.diff_scroll_y as usize;
+                let viewport_h = diff_inner.height as usize;
+
+                if app.git.diff_mode == GitDiffMode::SideBySide {
+                    // In side-by-side mode, show buttons at each change block (middle gutter)
+                    // Must match the layout in content rendering: left_w = (inner_w - sep_w) / 2
+                    let inner_w = diff_area.width.saturating_sub(2) as usize;
+                    let sep_w = 1usize;
+                    let left_w = inner_w.saturating_sub(sep_w) / 2;
+                    let btn_x = diff_area.x + 1 + left_w as u16; // Middle gutter position (on the │ separator)
+
+                    for (block_idx, block) in app.git.change_blocks.iter().enumerate() {
+                        if block.display_row >= scroll_y && block.display_row < scroll_y + viewport_h {
+                            let screen_y = diff_inner.y + (block.display_row - scroll_y) as u16;
+                            let btn_rect = Rect::new(btn_x, screen_y, 1, 1);
+
+                            // Draw the revert button (arrow in middle gutter)
+                            let btn_style = Style::default()
+                                .fg(app.palette.accent_secondary)
+                                .add_modifier(Modifier::BOLD);
+                            f.render_widget(
+                                Paragraph::new("→").style(btn_style),
+                                btn_rect,
+                            );
+
+                            // Register click zone (slightly wider for easier clicking)
+                            let click_rect = Rect::new(btn_x.saturating_sub(1), screen_y, 3, 1);
+                            zones.push(ClickZone {
+                                rect: click_rect,
+                                action: AppAction::RevertBlock(block_idx),
+                            });
+                        }
+                    }
+                } else {
+                    // In unified mode, show buttons at hunk headers
+                    let btn_x = diff_area.x + diff_area.width.saturating_sub(4);
+
+                    for (hunk_idx, hunk) in app.git.diff_hunks.iter().enumerate() {
+                        if hunk.display_row >= scroll_y && hunk.display_row < scroll_y + viewport_h {
+                            let screen_y = diff_inner.y + (hunk.display_row - scroll_y) as u16;
+                            let btn_rect = Rect::new(btn_x, screen_y, 3, 1);
+
+                            let btn_style = Style::default()
+                                .fg(app.palette.accent_secondary)
+                                .bg(app.palette.diff_hunk_bg)
+                                .add_modifier(Modifier::BOLD);
+                            f.render_widget(
+                                Paragraph::new(" ↩ ").style(btn_style),
+                                btn_rect,
+                            );
+
+                            zones.push(ClickZone {
+                                rect: btn_rect,
+                                action: AppAction::RevertHunk(hunk_idx),
+                            });
+                        }
+                    }
+                }
             }
         }
         Tab::Log => {
@@ -7789,6 +8270,55 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 }
             }
         }
+        Tab::Terminal => {
+            // Poll terminal output
+            app.terminal.poll_output();
+
+            let term_block = Block::default()
+                .borders(Borders::ALL)
+                .border_set(ratatui::symbols::border::PLAIN)
+                .border_style(Style::default().fg(app.palette.border_inactive))
+                .title(" Terminal ");
+            let inner = term_block.inner(content_area);
+            f.render_widget(term_block, content_area);
+
+            // Spawn shell if not active (use inner dimensions)
+            if !app.terminal.active {
+                app.terminal.spawn_shell(inner.width, inner.height, &app.current_path);
+            }
+
+            // Render terminal screen
+            let screen = app.terminal.parser.screen();
+            let rows = screen.size().0.min(inner.height);
+            let cols = screen.size().1.min(inner.width);
+            let mut lines: Vec<Line> = Vec::new();
+            for row in 0..rows {
+                let mut spans: Vec<Span> = Vec::new();
+                for col in 0..cols {
+                    let cell = screen.cell(row, col);
+                    if let Some(cell) = cell {
+                        let ch = cell.contents();
+                        let fg = match cell.fgcolor() {
+                            vt100::Color::Default => app.palette.fg,
+                            vt100::Color::Idx(i) => idx_to_color(i),
+                            vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+                        };
+                        let bg = match cell.bgcolor() {
+                            vt100::Color::Default => app.palette.bg,
+                            vt100::Color::Idx(i) => idx_to_color(i),
+                            vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+                        };
+                        let mut style = Style::default().fg(fg).bg(bg);
+                        if cell.bold() { style = style.add_modifier(Modifier::BOLD); }
+                        spans.push(Span::styled(if ch.is_empty() { " ".to_string() } else { ch.to_string() }, style));
+                    } else {
+                        spans.push(Span::raw(" "));
+                    }
+                }
+                lines.push(Line::from(spans));
+            }
+            f.render_widget(Paragraph::new(lines), inner);
+        }
     }
 
     if let Some(commit_area) = commit_area {
@@ -8174,6 +8704,14 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 true,
             ));
         }
+        Tab::Terminal => {
+            buttons.push((
+                " Type to interact with shell ".to_string(),
+                AppAction::None,
+                app.palette.border_inactive,
+                false,
+            ));
+        }
     }
 
     let available = footer_area.width.saturating_sub(4);
@@ -8249,7 +8787,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         if available > 0 {
             match app.current_tab {
                 Tab::Explorer => {
-                    let hint = "Ctrl+P menu  T theme";
+                    let hint = "Ctrl+P menu  T theme  r refresh";
                     let w = hint.len().min(available as usize) as u16;
                     f.render_widget(
                         Paragraph::new(hint)
@@ -8258,7 +8796,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     );
                 }
                 Tab::Git => {
-                    let hint = "Ctrl+P menu  T theme  S stash";
+                    let hint = "Ctrl+P menu  T theme  z stash";
                     let w = hint.len().min(available as usize) as u16;
                     f.render_widget(
                         Paragraph::new(hint)
@@ -8294,6 +8832,15 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             action: AppAction::OpenAuthorPicker,
                         });
                     }
+                }
+                Tab::Terminal => {
+                    let hint = "Ctrl+P menu  T theme";
+                    let w = hint.len().min(available as usize) as u16;
+                    f.render_widget(
+                        Paragraph::new(hint)
+                            .style(Style::default().fg(app.palette.border_inactive)),
+                        Rect::new(btn_x, btn_y, w, 1),
+                    );
                 }
             }
         }
@@ -9260,7 +9807,144 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         }
     }
 
+    // Delete confirmation dialog (Explorer tab)
+    if let Some(confirm) = &app.delete_confirm {
+        let w = area.width.min(60).saturating_sub(2).max(40);
+        let h = 7u16.min(area.height.saturating_sub(2)).max(5);
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let modal = Rect::new(x, y, w, h);
+
+        zones.push(ClickZone {
+            rect: area,
+            action: AppAction::None, // Click outside does nothing
+        });
+
+        f.render_widget(Clear, modal);
+
+        let title = if confirm.is_dir { " Delete Folder " } else { " Delete File " };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(ratatui::symbols::border::PLAIN)
+            .border_style(Style::default().fg(app.palette.diff_del_fg))
+            .title(title);
+        f.render_widget(block.clone(), modal);
+
+        let inner = modal.inner(Margin { vertical: 1, horizontal: 2 });
+
+        let name = confirm.path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| confirm.path.display().to_string());
+
+        let mut lines = Vec::new();
+        lines.push(Line::raw(format!("Delete: {}", name)));
+        if confirm.is_dir {
+            lines.push(Line::styled("(including all contents)", Style::default().fg(app.palette.border_inactive)));
+        }
+        lines.push(Line::raw(""));
+        lines.push(Line::raw("Confirm? (y/n)"));
+
+        f.render_widget(
+            Paragraph::new(lines).style(Style::default().fg(app.palette.fg)),
+            inner,
+        );
+    }
+
+    // Update confirmation dialog
+    if let Some(new_version) = &app.update_confirm {
+        let w = area.width.min(55).saturating_sub(2).max(40);
+        let h = 7u16.min(area.height.saturating_sub(2)).max(5);
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let modal = Rect::new(x, y, w, h);
+
+        zones.push(ClickZone {
+            rect: area,
+            action: AppAction::None,
+        });
+
+        f.render_widget(Clear, modal);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(ratatui::symbols::border::PLAIN)
+            .border_style(Style::default().fg(app.palette.accent_primary))
+            .title(" Update Available ");
+        f.render_widget(block.clone(), modal);
+
+        let inner = modal.inner(Margin { vertical: 1, horizontal: 2 });
+
+        let lines = vec![
+            Line::raw(format!("New version: v{} -> v{}", VERSION, new_version)),
+            Line::raw(""),
+            Line::raw("Update now? (y/n)"),
+        ];
+
+        f.render_widget(
+            Paragraph::new(lines).style(Style::default().fg(app.palette.fg)),
+            inner,
+        );
+    }
+
+    // Quick stash confirmation dialog
+    if app.quick_stash_confirm {
+        let w = area.width.min(45).saturating_sub(2).max(35);
+        let h = 6u16.min(area.height.saturating_sub(2)).max(5);
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let modal = Rect::new(x, y, w, h);
+
+        zones.push(ClickZone {
+            rect: area,
+            action: AppAction::None,
+        });
+
+        f.render_widget(Clear, modal);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(ratatui::symbols::border::PLAIN)
+            .border_style(Style::default().fg(app.palette.accent_primary))
+            .title(" Stash Changes ");
+        f.render_widget(block.clone(), modal);
+
+        let inner = modal.inner(Margin { vertical: 1, horizontal: 2 });
+
+        let lines = vec![
+            Line::raw("Stash all changes?"),
+            Line::raw(""),
+            Line::raw("(y/n)"),
+        ];
+
+        f.render_widget(
+            Paragraph::new(lines).style(Style::default().fg(app.palette.fg)),
+            inner,
+        );
+    }
+
     zones
+}
+
+fn idx_to_color(idx: u8) -> Color {
+    match idx {
+        0 => Color::Black,
+        1 => Color::Red,
+        2 => Color::Green,
+        3 => Color::Yellow,
+        4 => Color::Blue,
+        5 => Color::Magenta,
+        6 => Color::Cyan,
+        7 => Color::White,
+        8 => Color::DarkGray,
+        9 => Color::LightRed,
+        10 => Color::LightGreen,
+        11 => Color::LightYellow,
+        12 => Color::LightBlue,
+        13 => Color::LightMagenta,
+        14 => Color::LightCyan,
+        15 => Color::Gray,
+        n => Color::Indexed(n),
+    }
 }
 
 fn main() -> io::Result<()> {
@@ -9295,6 +9979,10 @@ fn main() -> io::Result<()> {
         app.poll_git_diff_job();
         app.poll_log_diff_job();
         app.maybe_expire_status();
+        // Auto-refresh explorer when directory changes
+        if app.current_tab == Tab::Explorer {
+            app.check_auto_refresh();
+        }
         // Force full terminal refresh if needed (e.g., after external editor)
         if app.needs_full_redraw {
             app.needs_full_redraw = false;
@@ -9376,6 +10064,8 @@ fn main() -> io::Result<()> {
                     KeyCode::Esc => {
                         app.context_menu = None;
                         app.discard_confirm = None;
+                        app.update_confirm = None;
+                        app.quick_stash_confirm = false;
                         app.operation_popup = None;
                         app.theme_picker.open = false;
                         app.command_palette.open = false;
@@ -9446,6 +10136,27 @@ fn main() -> io::Result<()> {
                                 }
                                 _ => {}
                             }
+                        } else if app.update_confirm.is_some() {
+                            match key.code {
+                                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                    app.confirm_update();
+                                }
+                                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                    app.update_confirm = None;
+                                }
+                                _ => {}
+                            }
+                        } else if app.quick_stash_confirm {
+                            match key.code {
+                                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                    app.quick_stash_confirm = false;
+                                    app.start_operation_job("git stash", true);
+                                }
+                                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                    app.quick_stash_confirm = false;
+                                }
+                                _ => {}
+                            }
                         } else if app.branch_ui.open {
                             if app.branch_ui.confirm_checkout.is_some() {
                                 match key.code {
@@ -9490,7 +10201,17 @@ fn main() -> io::Result<()> {
                             }
                         } else {
                             match app.current_tab {
-                                Tab::Explorer => match key.code {
+                                Tab::Explorer => if app.delete_confirm.is_some() {
+                                    match key.code {
+                                        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                            app.confirm_delete()
+                                        }
+                                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                            app.delete_confirm = None;
+                                        }
+                                        _ => {}
+                                    }
+                                } else { match key.code {
                                     KeyCode::Char('h') | KeyCode::Backspace | KeyCode::Left => {
                                         app.go_parent()
                                     }
@@ -9530,6 +10251,13 @@ fn main() -> io::Result<()> {
                                         }
                                     }
                                     KeyCode::Char('i') => app.add_selected_to_gitignore(),
+                                    KeyCode::Char('r') => {
+                                        app.load_files();
+                                        app.set_status("Refreshed");
+                                    }
+                                    KeyCode::Char('d') | KeyCode::Delete => {
+                                        app.show_delete_confirm();
+                                    }
                                     KeyCode::Char('e') => {
                                         app.open_selected_in_editor();
                                     }
@@ -9541,8 +10269,16 @@ fn main() -> io::Result<()> {
                                             "Syntax highlight: off"
                                         });
                                     }
+                                    KeyCode::Char('R') => {
+                                        app.auto_refresh = !app.auto_refresh;
+                                        app.set_status(if app.auto_refresh {
+                                            "Auto-refresh: on"
+                                        } else {
+                                            "Auto-refresh: off"
+                                        });
+                                    }
                                     _ => {}
-                                },
+                                }},
                                 Tab::Git => {
                                     if app.discard_confirm.is_some() {
                                         match key.code {
@@ -9683,7 +10419,9 @@ fn main() -> io::Result<()> {
                                                 });
                                             }
                                             KeyCode::Char('B') => app.open_branch_picker(),
-                                            KeyCode::Char('S') => app.open_stash_picker(),
+                                            KeyCode::Char('z') => {
+                                                app.quick_stash_confirm = true;
+                                            }
                                             KeyCode::Char('c') => {
                                                 app.commit.open = true;
                                                 app.commit.focus = CommitFocus::Message;
@@ -9748,6 +10486,8 @@ fn main() -> io::Result<()> {
                                                     GitDiffMode::SideBySide => GitDiffMode::Unified,
                                                 };
                                             }
+                                            KeyCode::Char('[') => app.adjust_git_left_width(-2),
+                                            KeyCode::Char(']') => app.adjust_git_left_width(2),
 
                                             KeyCode::Left => {
                                                 // Collapse or scroll diff
@@ -10141,6 +10881,43 @@ fn main() -> io::Result<()> {
                                         }
                                     }
                                 }
+                                Tab::Terminal => {
+                                    // Forward key input to the terminal
+                                    let bytes: Vec<u8> = match key.code {
+                                        KeyCode::Char(c) => {
+                                            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                                // Ctrl+letter -> 1-26
+                                                let code = c.to_ascii_lowercase() as u8;
+                                                if code >= b'a' && code <= b'z' {
+                                                    vec![code - b'a' + 1]
+                                                } else {
+                                                    vec![]
+                                                }
+                                            } else {
+                                                let mut buf = [0u8; 4];
+                                                c.encode_utf8(&mut buf).as_bytes().to_vec()
+                                            }
+                                        }
+                                        KeyCode::Enter => vec![b'\r'],
+                                        KeyCode::Backspace => vec![127],
+                                        KeyCode::Tab => vec![b'\t'],
+                                        KeyCode::Esc => vec![27],
+                                        KeyCode::Up => b"\x1b[A".to_vec(),
+                                        KeyCode::Down => b"\x1b[B".to_vec(),
+                                        KeyCode::Right => b"\x1b[C".to_vec(),
+                                        KeyCode::Left => b"\x1b[D".to_vec(),
+                                        KeyCode::Home => b"\x1b[H".to_vec(),
+                                        KeyCode::End => b"\x1b[F".to_vec(),
+                                        KeyCode::PageUp => b"\x1b[5~".to_vec(),
+                                        KeyCode::PageDown => b"\x1b[6~".to_vec(),
+                                        KeyCode::Delete => b"\x1b[3~".to_vec(),
+                                        KeyCode::Insert => b"\x1b[2~".to_vec(),
+                                        _ => vec![],
+                                    };
+                                    if !bytes.is_empty() {
+                                        app.terminal.write_input(&bytes);
+                                    }
+                                }
                             }
                         }
                     }
@@ -10233,6 +11010,9 @@ fn main() -> io::Result<()> {
                                         app.move_log_selection(3);
                                     }
                                 }
+                                Tab::Terminal => {
+                                    // Terminal handles scrollback internally
+                                }
                             }
                         }
                     }
@@ -10317,6 +11097,9 @@ fn main() -> io::Result<()> {
                                         app.log_ui.focus = LogPaneFocus::Commits;
                                         app.move_log_selection(-3);
                                     }
+                                }
+                                Tab::Terminal => {
+                                    // Terminal handles scrollback internally
                                 }
                             }
                         }

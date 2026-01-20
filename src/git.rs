@@ -61,6 +61,32 @@ pub enum GitDiffMode {
     Unified,
 }
 
+/// A hunk in a diff, used for partial staging/reverting
+#[derive(Clone, Debug)]
+pub struct DiffHunk {
+    /// Display row index where this hunk starts (unified mode)
+    pub display_row: usize,
+    /// Display row index in side-by-side mode
+    pub sbs_display_row: usize,
+    /// The raw diff lines for this hunk (header + content)
+    pub lines: Vec<String>,
+}
+
+/// A change block - consecutive deleted/added lines that can be reverted together
+#[derive(Clone, Debug)]
+pub struct ChangeBlock {
+    /// Display row in side-by-side view (first row of the block)
+    pub display_row: usize,
+    /// File path this block belongs to
+    pub file_path: String,
+    /// Starting line number in the NEW file (1-indexed)
+    pub new_start: u32,
+    /// Lines in the NEW file (additions to remove)
+    pub new_lines: Vec<String>,
+    /// Lines from the OLD file (deletions to restore)
+    pub old_lines: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct GitFileEntry {
     pub path: String,
@@ -94,6 +120,8 @@ pub struct GitState {
 
     pub diff_mode: GitDiffMode,
     pub diff_lines: Vec<String>,
+    pub diff_hunks: Vec<DiffHunk>,
+    pub change_blocks: Vec<ChangeBlock>,
     pub diff_scroll_y: u16,
     pub diff_scroll_x: u16,
     pub diff_generation: u64,
@@ -126,6 +154,8 @@ impl GitState {
             dir_expanded: BTreeSet::new(),
             diff_mode: GitDiffMode::SideBySide,
             diff_lines: Vec::new(),
+            diff_hunks: Vec::new(),
+            change_blocks: Vec::new(),
             diff_scroll_y: 0,
             diff_scroll_x: 0,
             diff_generation: 0,
@@ -209,14 +239,42 @@ impl GitState {
 
                 if &s[0..2] == "??" {
                     let path = s[3..].to_string();
-                    self.entries.push(GitFileEntry {
-                        path,
-                        x: '?',
-                        y: '?',
-                        is_untracked: true,
-                        is_conflict: false,
-                        renamed_from: None,
-                    });
+                    // Check if it's a directory (ends with / or is actually a directory)
+                    let full_path = root.join(&path);
+                    if full_path.is_dir() {
+                        // Expand untracked directory - list all files recursively
+                        fn collect_untracked_files(dir: &std::path::Path, base: &std::path::Path, entries: &mut Vec<GitFileEntry>) {
+                            if let Ok(read_dir) = std::fs::read_dir(dir) {
+                                for entry in read_dir.filter_map(|e| e.ok()) {
+                                    let entry_path = entry.path();
+                                    if entry_path.is_dir() {
+                                        collect_untracked_files(&entry_path, base, entries);
+                                    } else {
+                                        if let Ok(rel) = entry_path.strip_prefix(base) {
+                                            entries.push(GitFileEntry {
+                                                path: rel.to_string_lossy().to_string(),
+                                                x: '?',
+                                                y: '?',
+                                                is_untracked: true,
+                                                is_conflict: false,
+                                                renamed_from: None,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        collect_untracked_files(&full_path, &root, &mut self.entries);
+                    } else {
+                        self.entries.push(GitFileEntry {
+                            path,
+                            x: '?',
+                            y: '?',
+                            is_untracked: true,
+                            is_conflict: false,
+                            renamed_from: None,
+                        });
+                    }
                     i += 1;
                     continue;
                 }
@@ -273,6 +331,250 @@ impl GitState {
         self.list_state.select(Some(idx));
         self.diff_scroll_y = 0;
         self.diff_scroll_x = 0;
+    }
+
+    /// Set diff lines and parse hunks for revert functionality
+    pub fn set_diff_lines(&mut self, lines: Vec<String>) {
+        self.diff_lines = lines;
+        self.parse_hunks();
+    }
+
+    /// Parse hunks from diff_lines, tracking display row positions
+    fn parse_hunks(&mut self) {
+        self.diff_hunks.clear();
+
+        let mut current_hunk_lines: Vec<String> = Vec::new();
+        let mut current_hunk_start_display: usize = 0;
+        let mut file_header: Vec<String> = Vec::new();
+        let mut in_hunk = false;
+        let mut display_row: usize = 0;
+
+        for line in &self.diff_lines {
+            // Skip meta lines for display row counting (they're filtered in unified view)
+            let is_meta = line.starts_with("index ")
+                || line.starts_with("--- ")
+                || line.starts_with("+++ ");
+
+            if line.starts_with("diff --git ") {
+                // Save previous hunk if any
+                if in_hunk && !current_hunk_lines.is_empty() {
+                    let mut full_hunk = file_header.clone();
+                    full_hunk.extend(current_hunk_lines.drain(..));
+                    self.diff_hunks.push(DiffHunk {
+                        display_row: current_hunk_start_display,
+                        sbs_display_row: 0,
+                        lines: full_hunk,
+                    });
+                }
+
+                // Start new file
+                file_header.clear();
+                file_header.push(line.clone());
+                in_hunk = false;
+                display_row += 1; // diff --git line is shown
+            } else if line.starts_with("index ") || line.starts_with("--- ") || line.starts_with("+++ ") {
+                file_header.push(line.clone());
+                // These are not displayed in unified view
+            } else if line.starts_with("@@") {
+                // Save previous hunk if any
+                if in_hunk && !current_hunk_lines.is_empty() {
+                    let mut full_hunk = file_header.clone();
+                    full_hunk.extend(current_hunk_lines.drain(..));
+                    self.diff_hunks.push(DiffHunk {
+                        display_row: current_hunk_start_display,
+                        sbs_display_row: 0,
+                        lines: full_hunk,
+                    });
+                }
+
+                // Start new hunk
+                current_hunk_start_display = display_row;
+                current_hunk_lines.clear();
+                current_hunk_lines.push(line.clone());
+                in_hunk = true;
+                display_row += 1;
+            } else if in_hunk {
+                current_hunk_lines.push(line.clone());
+                if !is_meta {
+                    display_row += 1;
+                }
+            } else if !is_meta {
+                display_row += 1;
+            }
+        }
+
+        // Don't forget last hunk
+        if in_hunk && !current_hunk_lines.is_empty() {
+            let mut full_hunk = file_header.clone();
+            full_hunk.extend(current_hunk_lines);
+            self.diff_hunks.push(DiffHunk {
+                display_row: current_hunk_start_display,
+                sbs_display_row: 0,
+                lines: full_hunk,
+            });
+        }
+
+        // Calculate side-by-side display rows
+        self.compute_sbs_hunk_rows();
+    }
+
+    /// Compute side-by-side display row indices and change blocks
+    fn compute_sbs_hunk_rows(&mut self) {
+        use crate::git::build_side_by_side_rows;
+
+        self.change_blocks.clear();
+        let rows = build_side_by_side_rows(&self.diff_lines);
+        let mut hunk_idx = 0;
+        // Track display row matching the actual rendering output
+        let mut row_idx = 1usize; // Start at 1 for title row
+        let mut first_file = true;
+
+        // Track current file path and line numbers
+        let mut current_file_path = String::new();
+        let mut new_line: u32 = 1;
+
+        // For grouping consecutive changes
+        struct PendingBlock {
+            display_row: usize,
+            file_path: String,
+            new_start: u32,
+            old_lines: Vec<String>,
+            new_lines: Vec<String>,
+        }
+
+        let mut current_block: Option<PendingBlock> = None;
+
+        for row in &rows {
+            match row {
+                GitDiffRow::Meta(t) => {
+                    if t.starts_with("diff --git") {
+                        // Finish any pending block
+                        if let Some(block) = current_block.take() {
+                            if !block.old_lines.is_empty() || !block.new_lines.is_empty() {
+                                self.change_blocks.push(ChangeBlock {
+                                    display_row: block.display_row,
+                                    file_path: block.file_path,
+                                    new_start: block.new_start,
+                                    new_lines: block.new_lines,
+                                    old_lines: block.old_lines,
+                                });
+                            }
+                        }
+
+                        // Extract file path from "diff --git a/path b/path"
+                        current_file_path = t
+                            .strip_prefix("diff --git a/")
+                            .and_then(|s| s.split(" b/").next())
+                            .unwrap_or("")
+                            .to_string();
+
+                        if !first_file {
+                            row_idx += 2;
+                        }
+                        first_file = false;
+                        row_idx += 1;
+                    } else if t.starts_with("index ") || t.starts_with("--- ") || t.starts_with("+++ ") {
+                        // Skipped in rendering
+                    } else if t.starts_with("@@") {
+                        // Finish any pending block
+                        if let Some(block) = current_block.take() {
+                            if !block.old_lines.is_empty() || !block.new_lines.is_empty() {
+                                self.change_blocks.push(ChangeBlock {
+                                    display_row: block.display_row,
+                                    file_path: block.file_path,
+                                    new_start: block.new_start,
+                                    new_lines: block.new_lines,
+                                    old_lines: block.old_lines,
+                                });
+                            }
+                        }
+
+                        if let Some((_, n)) = parse_hunk_header(t) {
+                            new_line = n;
+                        }
+
+                        row_idx += 1; // Empty line
+                        if hunk_idx < self.diff_hunks.len() {
+                            self.diff_hunks[hunk_idx].sbs_display_row = row_idx;
+                            hunk_idx += 1;
+                        }
+                        row_idx += 1; // Hunk header
+                    } else {
+                        row_idx += 1;
+                    }
+                }
+                GitDiffRow::Split { old, new } => {
+                    match (old.kind, new.kind) {
+                        (GitDiffCellKind::Context, GitDiffCellKind::Context) => {
+                            // Context line - finalize any pending block
+                            if let Some(block) = current_block.take() {
+                                if !block.old_lines.is_empty() || !block.new_lines.is_empty() {
+                                    self.change_blocks.push(ChangeBlock {
+                                        display_row: block.display_row,
+                                        file_path: block.file_path,
+                                        new_start: block.new_start,
+                                        new_lines: block.new_lines,
+                                        old_lines: block.old_lines,
+                                    });
+                                }
+                            }
+                            if new.line_no.is_some() { new_line += 1; }
+                        }
+                        (GitDiffCellKind::Delete, _) | (_, GitDiffCellKind::Add) => {
+                            if current_block.is_none() {
+                                current_block = Some(PendingBlock {
+                                    display_row: row_idx,
+                                    file_path: current_file_path.clone(),
+                                    new_start: new_line,
+                                    old_lines: Vec::new(),
+                                    new_lines: Vec::new(),
+                                });
+                            }
+
+                            if let Some(ref mut block) = current_block {
+                                if old.kind == GitDiffCellKind::Delete {
+                                    block.old_lines.push(old.text.clone());
+                                }
+                                if new.kind == GitDiffCellKind::Add {
+                                    block.new_lines.push(new.text.clone());
+                                    new_line += 1;
+                                }
+                            }
+                        }
+                        _ => {
+                            if new.line_no.is_some() { new_line += 1; }
+                        }
+                    }
+                    row_idx += 1;
+                }
+            }
+        }
+
+        // Finish any pending block
+        if let Some(block) = current_block.take() {
+            if !block.old_lines.is_empty() || !block.new_lines.is_empty() {
+                self.change_blocks.push(ChangeBlock {
+                    display_row: block.display_row,
+                    file_path: block.file_path,
+                    new_start: block.new_start,
+                    new_lines: block.new_lines,
+                    old_lines: block.old_lines,
+                });
+            }
+        }
+    }
+
+    /// Get the hunk index at or before a given display row
+    pub fn hunk_at_display_row(&self, row: usize) -> Option<usize> {
+        let mut result = None;
+        for (i, hunk) in self.diff_hunks.iter().enumerate() {
+            if hunk.display_row <= row {
+                result = Some(i);
+            } else {
+                break;
+            }
+        }
+        result
     }
 
     pub fn selected_entry(&self) -> Option<&GitFileEntry> {
