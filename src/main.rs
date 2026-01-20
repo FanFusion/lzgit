@@ -6580,8 +6580,13 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     .split(inner);
 
                 let sep_style = Style::default().fg(app.palette.border_inactive);
-                let title_style = Style::default()
-                    .fg(app.palette.fg)
+                let ours_header_style = Style::default()
+                    .fg(app.palette.diff_add_fg)
+                    .bg(app.palette.diff_add_bg)
+                    .add_modifier(Modifier::BOLD);
+                let theirs_header_style = Style::default()
+                    .fg(app.palette.accent_primary)
+                    .bg(app.palette.diff_hunk_bg)
                     .add_modifier(Modifier::BOLD);
 
                 let inner_w = rows[0].width as usize;
@@ -6594,17 +6599,17 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     let cur = app.conflict_ui.selected_block + 1;
                     (
                         n,
-                        format!(" Ours ({}/{}) ", cur.min(n.max(1)), n),
-                        " Theirs ".to_string(),
+                        format!(" ◀ Ours ({}/{}) ", cur.min(n.max(1)), n),
+                        " Theirs ▶ ".to_string(),
                     )
                 } else {
-                    (0, " Ours ".to_string(), " Theirs ".to_string())
+                    (0, " ◀ Ours ".to_string(), " Theirs ▶ ".to_string())
                 };
 
                 let header = Line::from(vec![
-                    Span::styled(pad_to_width(ours_title, left_w), title_style),
+                    Span::styled(pad_to_width(ours_title, left_w), ours_header_style),
                     Span::styled("│", sep_style),
-                    Span::styled(pad_to_width(theirs_title, right_w), title_style),
+                    Span::styled(pad_to_width(theirs_title, right_w), theirs_header_style),
                 ]);
                 f.render_widget(Paragraph::new(header), rows[0]);
 
@@ -6616,23 +6621,56 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                         let idx = app.conflict_ui.selected_block.min(file.blocks.len() - 1);
                         let block = &file.blocks[idx];
                         let n = block.ours.len().max(block.theirs.len());
+
+                        let gutter_style = Style::default().fg(app.palette.diff_gutter_fg);
+                        let ours_style = Style::default()
+                            .fg(app.palette.diff_add_fg)
+                            .bg(app.palette.diff_add_bg);
+                        let theirs_style = Style::default()
+                            .fg(app.palette.accent_primary)
+                            .bg(app.palette.diff_hunk_bg);
+                        let empty_ours_style = Style::default().bg(app.palette.diff_add_bg);
+                        let empty_theirs_style = Style::default().bg(app.palette.diff_hunk_bg);
+
+                        let gutter_w = 4usize;
+                        let content_left_w = left_w.saturating_sub(gutter_w);
+                        let content_right_w = right_w.saturating_sub(gutter_w);
+
                         for i in 0..n {
+                            let has_left = i < block.ours.len();
+                            let has_right = i < block.theirs.len();
                             let left = block.ours.get(i).cloned().unwrap_or_default();
                             let right = block.theirs.get(i).cloned().unwrap_or_default();
 
+                            let left_ln = if has_left {
+                                format!("{:>3} ", i + 1)
+                            } else {
+                                "    ".to_string()
+                            };
+                            let right_ln = if has_right {
+                                format!("{:>3} ", i + 1)
+                            } else {
+                                "    ".to_string()
+                            };
+
                             let left = pad_to_width(
-                                git::slice_chars(&left, app.git.diff_scroll_x as usize, left_w),
-                                left_w,
+                                git::slice_chars(&left, app.git.diff_scroll_x as usize, content_left_w),
+                                content_left_w,
                             );
                             let right = pad_to_width(
-                                git::slice_chars(&right, app.git.diff_scroll_x as usize, right_w),
-                                right_w,
+                                git::slice_chars(&right, app.git.diff_scroll_x as usize, content_right_w),
+                                content_right_w,
                             );
 
+                            let left_style = if has_left { ours_style } else { empty_ours_style };
+                            let right_style = if has_right { theirs_style } else { empty_theirs_style };
+
                             content_lines.push(Line::from(vec![
-                                Span::styled(left, Style::default().fg(app.palette.fg)),
+                                Span::styled(left_ln, gutter_style),
+                                Span::styled(left, left_style),
                                 Span::styled("│", sep_style),
-                                Span::styled(right, Style::default().fg(app.palette.fg)),
+                                Span::styled(right_ln, gutter_style),
+                                Span::styled(right, right_style),
                             ]));
                         }
                     }
