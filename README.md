@@ -1,176 +1,101 @@
-# TUI Explorer
+# lzgit
 
-A modern, fast terminal file explorer written in Rust with mouse support.
+> Because typing `lazygit` is 7 characters. Way too much effort.
 
-![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange)
-![License](https://img.shields.io/badge/License-MIT-blue)
+## What is this?
 
-## Features
+A Git TUI for lazy people. Like, *really* lazy.
 
-- **Modern UI** - Clean interface with Tokyo Night color scheme and rounded borders
-- **Mouse Support** - Click to select files, scroll wheel to navigate
-- **File Preview** - Real-time preview of file contents and directory listings
-- **Vim-style Navigation** - hjkl keys for power users
-- **File Icons** - Nerd Font icons for different file types
-- **Fast** - Built with Rust for maximum performance
-- **Lightweight** - Single binary, no dependencies at runtime
+## Origin Story
 
-## Screenshots
+Here's the thing:
 
-```
-  Explorer /home/user/projects
-╭─ Files (42) ──────────────────────╮╭─ Preview ─────────────────────────╮
-│  ▸  src/                         ││  main.rs                          │
-│     docs/                        ││  lib.rs                           │
-│     tests/                       ││  utils/                           │
-│     Cargo.toml            1.2K   ││                                   │
-│     README.md             3.4K   ││                                   │
-│     .gitignore            128B   ││                                   │
-╰───────────────────────────────────╯╰───────────────────────────────────╯
- ↑↓/jk nav  Enter/l open  Backspace/h back  g/G top/end  q quit
-```
+I spend all day on servers using Claude Code to write code (yes, we're in the vibe coding era now). Every time I want to check a diff, I have to open VSCode Remote SSH, wait forever to connect, just to look at two changed lines.
+
+"Maybe I should build a TUI?"
+
+Then I realized I can't even remember lazygit's shortcuts. Is `s` for stage or stash? What about `S`? You know what, forget it.
+
+And so lzgit was born:
+
+- **lzgit** - 2 fewer characters than lazygit (this matters)
+- Almost everything works with **mouse clicks** (because I genuinely cannot remember shortcuts)
+- UI stolen from VSCode (because it looks nice)
+- Built-in terminal (too lazy to switch windows)
+- In-app updates (too lazy to manually install)
+
+## About the Code
+
+I don't know a single line of Rust.
+
+This entire project is 100% written by Claude Code. My contributions:
+- Describing what I want
+- Saying "that's not right"
+- Saying "try again"
+- Saying "fine, that works I guess"
 
 ## Installation
 
-### From Source
-
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/tui-explorer-rs.git
-cd tui-explorer-rs
+# Recommended: Pre-built binary (instant)
+cargo binstall lzgit
 
-# Build and install
-cargo build --release
-sudo cp target/release/tui-explorer-rs /usr/local/bin/te
+# Or build from source (grab a coffee, this takes a few minutes)
+cargo install lzgit
 ```
-
-### Requirements
-
-- Rust 1.70 or later
-- A terminal with true color support (recommended)
-- Nerd Font for file icons (optional but recommended)
 
 ## Usage
 
 ```bash
-# Open current directory
-te
-
-# Open specific directory
-te /path/to/directory
-
-# Open home directory
-te ~
+lzgit              # Launch in current directory
+lzgit /path/to/repo  # Open specific repo
 ```
 
-## Keybindings
+### Shortcuts?
 
-### Navigation
+Honestly, I don't remember them all either. But:
 
-| Key | Action |
-|-----|--------|
-| `↑` / `k` | Move selection up |
-| `↓` / `j` | Move selection down |
-| `PageUp` | Move up 10 items |
-| `PageDown` | Move down 10 items |
-| `g` | Go to first item |
-| `G` | Go to last item |
+- **Just use your mouse**
+- `Ctrl+P` - Command palette (stolen from VSCode)
+- `T` - Change theme
+- `1` `2` `3` - Switch tabs
+- `q` - Quit
 
-### Actions
+Everything else... just click it.
 
-| Key | Action |
-|-----|--------|
-| `Enter` / `l` | Enter directory |
-| `Backspace` / `h` | Go to parent directory |
-| `q` | Quit |
+## Features
 
-### Mouse
+- **Git Tab** - stage/unstage/commit/push/pull, all the usual stuff
+- **History Tab** - Browse commits, filter by author
+- **Explorer Tab** - File browser with syntax-highlighted preview
+- **Terminal Tab** - Built-in terminal, no window switching
+- **Conflict Resolution** - Three-way merge view (stolen from VSCode)
+- **Themes** - 6 themes, pick your favorite
 
-| Action | Effect |
-|--------|--------|
-| Left Click | Select file/directory |
-| Scroll Up | Move selection up |
-| Scroll Down | Move selection down |
+## Having Issues?
 
-## Color Scheme
-
-TUI Explorer uses the **Tokyo Night** color scheme:
-
-| Element | Color |
-|---------|-------|
-| Directories | Blue (#7aa2f7) |
-| Files | Light gray (#c0caf5) |
-| Symlinks | Purple (#bb9af7) |
-| Executables | Green (#9ece6a) |
-| Hidden files | Dim gray (#565f89) |
-| Selected item | Blue background |
-
-## File Icons
-
-Icons are displayed for common file types (requires Nerd Font):
-
-| Icon | File Types |
-|------|------------|
-|  | Directories |
-|  | Symlinks |
-|  | Rust (.rs) |
-|  | TypeScript (.ts, .tsx) |
-|  | JavaScript (.js, .jsx) |
-|  | Python (.py) |
-|  | Go (.go) |
-|  | JSON (.json) |
-|  | Config (.toml, .yaml, .yml) |
-|  | Markdown (.md) |
-|  | Shell (.sh, .bash) |
-|  | Lock files |
-|  | Other files |
-
-## Configuration
-
-Currently, TUI Explorer uses built-in defaults. Configuration file support is planned for future releases.
-
-## Project Structure
+1. Open an issue
+2. Or faster: Ask Claude Code to fix it
 
 ```
-tui-explorer-rs/
-├── src/
-│   └── main.rs      # Main application code
-├── Cargo.toml       # Project dependencies
-├── README.md        # This file
-└── LICENSE          # MIT License
+claude "fix this lzgit bug: xxx"
 ```
 
-## Dependencies
+After all, it wrote the whole thing anyway.
 
-- [ratatui](https://github.com/ratatui-org/ratatui) - Terminal UI framework
-- [crossterm](https://github.com/crossterm-rs/crossterm) - Cross-platform terminal manipulation
+## Why not just use lazygit?
 
-## Contributing
+lazygit is great, but:
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## Roadmap
-
-- [ ] Configuration file support
-- [ ] Custom themes
-- [ ] File operations (copy, move, delete)
-- [ ] Bookmarks
-- [ ] Search/filter functionality
-- [ ] Multiple panels
-- [ ] Integration with system file opener
+1. I can't remember the shortcuts
+2. `lazygit` is 7 characters to type
+3. I want mouse support
+4. I wanted to build something myself (well, have Claude build it)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT - Use it however you want. It's not like I wrote the code anyway.
 
-## Acknowledgments
+---
 
-- Inspired by [lazygit](https://github.com/jesseduffield/lazygit) UI design
-- Built with [ratatui](https://ratatui.rs/)
-- Color scheme based on [Tokyo Night](https://github.com/enkia/tokyo-night-vscode-theme)
+*Made with mass, written by Claude Code*
