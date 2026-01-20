@@ -1538,6 +1538,8 @@ struct App {
 
     // Update confirmation
     update_confirm: Option<String>, // Some(new_version) when update available
+    update_in_progress: bool,
+    spinner_frame: usize,
 
     // Quick stash confirmation
     quick_stash_confirm: bool,
@@ -1626,6 +1628,8 @@ impl App {
             dir_mtime: None,
             auto_refresh: true,
             update_confirm: None,
+            update_in_progress: false,
+            spinner_frame: 0,
             quick_stash_confirm: false,
             new_branch_input: None,
             context_menu: None,
@@ -2737,6 +2741,10 @@ impl App {
                 close_commit,
             } => {
                 self.push_git_log(cmd.clone(), &result);
+
+                if cmd == "cargo install lzgit --force" {
+                    self.update_in_progress = false;
+                }
 
                 if refresh {
                     self.refresh_git_state();
@@ -3890,6 +3898,7 @@ impl App {
     fn confirm_update(&mut self) {
         if let Some(new_version) = self.update_confirm.take() {
             self.set_status(&format!("Updating to v{}...", new_version));
+            self.update_in_progress = true;
             self.start_operation_job("cargo install lzgit --force", false);
         }
     }
@@ -10021,6 +10030,41 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         );
     }
 
+    if app.update_in_progress {
+        let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let spinner = spinner_chars[app.spinner_frame % spinner_chars.len()];
+
+        let w = area.width.min(40).saturating_sub(2).max(30);
+        let h = 5u16.min(area.height.saturating_sub(2)).max(4);
+        let x = area.x + (area.width.saturating_sub(w)) / 2;
+        let y = area.y + (area.height.saturating_sub(h)) / 2;
+        let modal = Rect::new(x, y, w, h);
+
+        zones.push(ClickZone {
+            rect: area,
+            action: AppAction::None,
+        });
+
+        f.render_widget(Clear, modal);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(ratatui::symbols::border::PLAIN)
+            .border_style(Style::default().fg(app.palette.accent_primary))
+            .title(" Updating ");
+        f.render_widget(block.clone(), modal);
+
+        let inner = modal.inner(Margin { vertical: 1, horizontal: 2 });
+
+        let text = format!("{} Installing lzgit...", spinner);
+        f.render_widget(
+            Paragraph::new(text)
+                .style(Style::default().fg(app.palette.fg))
+                .alignment(ratatui::layout::Alignment::Center),
+            inner,
+        );
+    }
+
     zones
 }
 
@@ -10098,6 +10142,10 @@ fn main() -> io::Result<()> {
             app.preview_error = Some(format!("Image Error: {}", e));
             app.image_state = None;
             app.current_image_path = None;
+        }
+
+        if app.update_in_progress {
+            app.spinner_frame = app.spinner_frame.wrapping_add(1);
         }
 
         if event::poll(Duration::from_millis(100))? {

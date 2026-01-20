@@ -1,6 +1,6 @@
 [package]
 name = "lzgit"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 description = "A modern, fast TUI file explorer with Git integration"
 readme = "README.md"
