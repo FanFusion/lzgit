@@ -10033,35 +10033,16 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
     if app.update_in_progress {
         let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         let spinner = spinner_chars[app.spinner_frame % spinner_chars.len()];
+        let text = format!(" {} Updating... ", spinner);
+        let w = text.len() as u16 + 2;
+        let x = area.x + area.width.saturating_sub(w + 1);
+        let y = area.y + area.height.saturating_sub(2);
+        let rect = Rect::new(x, y, w, 1);
 
-        let w = area.width.min(40).saturating_sub(2).max(30);
-        let h = 5u16.min(area.height.saturating_sub(2)).max(4);
-        let x = area.x + (area.width.saturating_sub(w)) / 2;
-        let y = area.y + (area.height.saturating_sub(h)) / 2;
-        let modal = Rect::new(x, y, w, h);
-
-        zones.push(ClickZone {
-            rect: area,
-            action: AppAction::None,
-        });
-
-        f.render_widget(Clear, modal);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_set(ratatui::symbols::border::PLAIN)
-            .border_style(Style::default().fg(app.palette.accent_primary))
-            .title(" Updating ");
-        f.render_widget(block.clone(), modal);
-
-        let inner = modal.inner(Margin { vertical: 1, horizontal: 2 });
-
-        let text = format!("{} Installing lzgit...", spinner);
         f.render_widget(
             Paragraph::new(text)
-                .style(Style::default().fg(app.palette.fg))
-                .alignment(ratatui::layout::Alignment::Center),
-            inner,
+                .style(Style::default().fg(app.palette.bg).bg(app.palette.accent_primary)),
+            rect,
         );
     }
 
