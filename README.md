@@ -37,7 +37,10 @@ This entire project is 100% written by Claude Code. My contributions:
 ## Installation
 
 ```bash
-# Recommended: Pre-built binary (instant)
+# The AI era way (just ask Claude Code)
+claude "install lzgit from https://github.com/FanFusion/lzgit"
+
+# Pre-built binary (instant)
 cargo binstall lzgit
 
 # Or build from source (grab a coffee, this takes a few minutes)
