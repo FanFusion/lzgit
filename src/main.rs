@@ -8581,13 +8581,6 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 app.palette.accent_primary,
                 true,
             ));
-            buttons.push((
-                " Stash (S) ".to_string(),
-                AppAction::OpenStashPicker,
-                app.palette.accent_secondary,
-                app.pending_job.is_none() && !app.commit.busy,
-            ));
-
             let enabled = app.pending_job.is_none() && !app.commit.busy && !app.branch_ui.open;
             let in_conflict_view = app.git.selected_tree_entry().is_some_and(|e| e.is_conflict);
 
