@@ -10120,6 +10120,14 @@ fn idx_to_color(idx: u8) -> Color {
 fn main() -> io::Result<()> {
     let _ = dotenvy::dotenv();
 
+    // Handle --version / -V
+    if let Some(arg) = env::args().nth(1) {
+        if arg == "--version" || arg == "-V" {
+            println!("lzgit {}", VERSION);
+            return Ok(());
+        }
+    }
+
     let start_path = env::args()
         .nth(1)
         .map(PathBuf::from)
