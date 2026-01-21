@@ -1705,6 +1705,10 @@ impl App {
 
         self.git.diff_scroll_y = 0;
         self.git.diff_scroll_x = 0;
+        // Reset full file view when selection changes
+        self.git.show_full_file = false;
+        self.git.full_file_content = None;
+        self.git.full_file_scroll_y = 0;
 
         let Some(repo_root) = self.git.repo_root.clone() else {
             self.git.diff_lines.clear();
@@ -1801,6 +1805,45 @@ impl App {
 
         if git_ops::merge_head_exists(&repo_root).unwrap_or(false) {
             self.git_operation = Some(GitOperation::Merge);
+        }
+    }
+
+    fn toggle_full_file_view(&mut self) {
+        self.git.show_full_file = !self.git.show_full_file;
+
+        if self.git.show_full_file {
+            // Load the full file content
+            let Some(repo_root) = self.git.repo_root.clone() else {
+                self.git.full_file_content = Some("Not a git repository".to_string());
+                return;
+            };
+
+            let Some(entry) = self.git.selected_tree_entry().cloned() else {
+                self.git.full_file_content = Some("No file selected".to_string());
+                return;
+            };
+
+            let file_path = repo_root.join(&entry.path);
+            match std::fs::read_to_string(&file_path) {
+                Ok(content) => {
+                    self.git.full_file_content = Some(content);
+                    self.git.full_file_scroll_y = 0;
+                    self.git_diff_cache.invalidate();
+                }
+                Err(e) => {
+                    // Try to read as binary
+                    if file_path.exists() {
+                        self.git.full_file_content = Some(format!("Binary file or read error: {}", e));
+                    } else {
+                        self.git.full_file_content = Some(format!("File not found: {}", entry.path));
+                    }
+                }
+            }
+            self.set_status("Full file view (press F to return to diff)");
+        } else {
+            self.git.full_file_content = None;
+            self.git_diff_cache.invalidate();
+            self.set_status("Diff view");
         }
     }
 
@@ -6831,6 +6874,68 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                         Rect::new(rows[2].x, rows[2].y, w, 1),
                     );
                 }
+            } else if app.git.show_full_file {
+                // Full file view mode
+                let file_name = app
+                    .git
+                    .selected_tree_entry()
+                    .map(|e| e.path.as_str())
+                    .unwrap_or("File");
+                let diff_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_set(ratatui::symbols::border::PLAIN)
+                    .border_style(Style::default().fg(app.palette.border_inactive))
+                    .title(format!(" {} (press F for diff) ", file_name));
+
+                let content = app.git.full_file_content.as_deref().unwrap_or("No content");
+                let ext = app
+                    .git
+                    .selected_tree_entry()
+                    .and_then(|e| std::path::Path::new(e.path.as_str()).extension())
+                    .and_then(|s| s.to_str());
+
+                let lines: Vec<Line> = if app.syntax_highlight {
+                    if let Some(ext) = ext {
+                        highlight::highlight_text(content, ext, app.palette.bg)
+                            .unwrap_or_else(|| content.lines().map(Line::raw).collect())
+                    } else {
+                        content.lines().map(Line::raw).collect()
+                    }
+                } else {
+                    content.lines().map(Line::raw).collect()
+                };
+
+                let lines_len = lines.len();
+                let viewport_h = diff_area.height.saturating_sub(2) as usize;
+                let max_scroll = lines_len.saturating_sub(viewport_h);
+                let scroll_y = (app.git.full_file_scroll_y as usize).min(max_scroll);
+
+                let para = Paragraph::new(lines)
+                    .block(diff_block)
+                    .scroll((scroll_y as u16, 0));
+                f.render_widget(para, diff_area);
+
+                // Scrollbar
+                if lines_len > viewport_h {
+                    let sb_area = Rect::new(
+                        diff_area.x + diff_area.width.saturating_sub(1),
+                        diff_area.y + 1,
+                        1,
+                        diff_area.height.saturating_sub(2),
+                    );
+                    let mut sb_state = ScrollbarState::new(lines_len)
+                        .position(scroll_y)
+                        .viewport_content_length(viewport_h);
+                    f.render_stateful_widget(
+                        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                            .begin_symbol(None)
+                            .end_symbol(None)
+                            .track_symbol(Some("│"))
+                            .thumb_symbol("█"),
+                        sb_area,
+                        &mut sb_state,
+                    );
+                }
             } else {
                 let mode_label = match app.git.diff_mode {
                     GitDiffMode::SideBySide => "SxS",
@@ -6903,6 +7008,15 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                             .strip_prefix("diff --git a/")
                                             .and_then(|s| s.split(" b/").next())
                                             .unwrap_or(t);
+
+                                        // Update highlighter for this file's extension
+                                        if app.syntax_highlight {
+                                            let ext = std::path::Path::new(full_path)
+                                                .extension()
+                                                .and_then(|s| s.to_str());
+                                            highlighter = ext.and_then(new_highlighter);
+                                        }
+
                                         // Show filename first, then directory
                                         let (dir, filename) = match full_path.rfind('/') {
                                             Some(i) => (&full_path[..i+1], &full_path[i+1..]),
@@ -7086,6 +7200,16 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                                                     .strip_prefix("diff --git a/")
                                                     .and_then(|s| s.split(" b/").next())
                                                     .unwrap_or(t.as_str());
+
+                                                // Update highlighters for this file's extension
+                                                if app.syntax_highlight {
+                                                    let ext = std::path::Path::new(full_path)
+                                                        .extension()
+                                                        .and_then(|s| s.to_str());
+                                                    hl_old = ext.and_then(new_highlighter);
+                                                    hl_new = ext.and_then(new_highlighter);
+                                                }
+
                                                 let (dir, filename) = match full_path.rfind('/') {
                                                     Some(i) => (&full_path[..i+1], &full_path[i+1..]),
                                                     None => ("", full_path),
@@ -10633,6 +10757,7 @@ fn main() -> io::Result<()> {
                                                     "Syntax highlight: off"
                                                 });
                                             }
+                                            KeyCode::Char('F') => app.toggle_full_file_view(),
                                             KeyCode::Char('B') => app.open_branch_picker(),
                                             KeyCode::Char('z') => {
                                                 app.quick_stash_confirm = true;
@@ -11187,6 +11312,9 @@ fn main() -> io::Result<()> {
                                         {
                                             app.conflict_ui.scroll_y =
                                                 app.conflict_ui.scroll_y.saturating_add(3);
+                                        } else if app.git.show_full_file {
+                                            app.git.full_file_scroll_y =
+                                                app.git.full_file_scroll_y.saturating_add(3);
                                         } else {
                                             app.git.diff_scroll_y =
                                                 app.git.diff_scroll_y.saturating_add(3);
@@ -11276,6 +11404,9 @@ fn main() -> io::Result<()> {
                                         {
                                             app.conflict_ui.scroll_y =
                                                 app.conflict_ui.scroll_y.saturating_sub(3);
+                                        } else if app.git.show_full_file {
+                                            app.git.full_file_scroll_y =
+                                                app.git.full_file_scroll_y.saturating_sub(3);
                                         } else {
                                             app.git.diff_scroll_y =
                                                 app.git.diff_scroll_y.saturating_sub(3);

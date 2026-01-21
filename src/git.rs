@@ -126,6 +126,11 @@ pub struct GitState {
     pub diff_scroll_x: u16,
     pub diff_generation: u64,
     pub diff_request_id: u64,
+
+    /// Show full file content instead of diff
+    pub show_full_file: bool,
+    pub full_file_content: Option<String>,
+    pub full_file_scroll_y: u16,
 }
 
 impl GitState {
@@ -160,6 +165,9 @@ impl GitState {
             diff_scroll_x: 0,
             diff_generation: 0,
             diff_request_id: 0,
+            show_full_file: false,
+            full_file_content: None,
+            full_file_scroll_y: 0,
         }
     }
 
@@ -1049,13 +1057,70 @@ impl GitState {
     }
 
     /// Get paths of all selected items in tree view
+    /// Supports files, directories (all files under it), and sections (all files in section)
     pub fn selected_tree_paths(&self) -> Vec<String> {
         if !self.selected_paths.is_empty() {
             return self.selected_paths.iter().cloned().collect();
         }
-        self.selected_tree_entry()
-            .map(|e| vec![e.path.clone()])
-            .unwrap_or_default()
+
+        let Some(item) = self.selected_tree_item() else {
+            return Vec::new();
+        };
+
+        match item.node_type {
+            FlatNodeType::File => {
+                if let Some(idx) = item.entry_idx {
+                    if let Some(e) = self.entries.get(idx) {
+                        return vec![e.path.clone()];
+                    }
+                }
+                Vec::new()
+            }
+            FlatNodeType::Directory => {
+                // Collect all files under this directory in the same section
+                let dir_path = &item.path;
+                let section = item.section;
+                let prefix = format!("{}/", dir_path);
+
+                self.entries
+                    .iter()
+                    .filter(|e| {
+                        let e_section = Self::entry_section(e);
+                        e_section == section && (e.path.starts_with(&prefix) || e.path == *dir_path)
+                    })
+                    .map(|e| e.path.clone())
+                    .collect()
+            }
+            FlatNodeType::Section => {
+                // Collect all files in this section
+                let section = item.section;
+                self.entries
+                    .iter()
+                    .filter(|e| Self::entry_section(e) == section)
+                    .map(|e| e.path.clone())
+                    .collect()
+            }
+        }
+    }
+
+    /// Determine which section an entry belongs to
+    fn entry_section(entry: &GitFileEntry) -> GitSection {
+        if entry.is_conflict {
+            GitSection::Conflicts
+        } else if entry.x == '?' {
+            GitSection::Untracked
+        } else if entry.x != ' ' && entry.x != '?' {
+            // Has staged changes
+            if entry.y != ' ' && entry.y != '?' {
+                // Also has unstaged changes - entry appears in both sections
+                // For toggle purposes, treat as staged if we're looking from staged view
+                GitSection::Staged
+            } else {
+                GitSection::Staged
+            }
+        } else {
+            GitSection::Working
+        }
     }
 
     /// Select tree item at index
