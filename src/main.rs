@@ -33,6 +33,30 @@ use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Compare two version strings (e.g., "0.4.1" vs "0.3.7")
+/// Returns true if `new` is newer than `current`
+fn is_newer_version(new: &str, current: &str) -> bool {
+    let parse = |v: &str| -> Vec<u32> {
+        v.split('.')
+            .filter_map(|s| s.parse().ok())
+            .collect()
+    };
+    let new_parts = parse(new);
+    let cur_parts = parse(current);
+
+    for i in 0..new_parts.len().max(cur_parts.len()) {
+        let n = new_parts.get(i).copied().unwrap_or(0);
+        let c = cur_parts.get(i).copied().unwrap_or(0);
+        if n > c {
+            return true;
+        }
+        if n < c {
+            return false;
+        }
+    }
+    false
+}
+
 mod branch;
 mod commit;
 mod conflict;
@@ -3976,9 +4000,12 @@ impl App {
             Ok(latest) => {
                 if latest == VERSION {
                     self.set_status(&format!("You're up to date! (v{})", VERSION));
-                } else {
-                    // Show update confirmation dialog
+                } else if is_newer_version(&latest, VERSION) {
+                    // Only show update if latest is actually newer
                     self.update_confirm = Some(latest);
+                } else {
+                    // Current version is newer (dev build or unreleased)
+                    self.set_status(&format!("You're up to date! (v{} > v{})", VERSION, latest));
                 }
             }
             Err(e) => {
@@ -6875,7 +6902,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     );
                 }
             } else if app.git.show_full_file {
-                // Full file view mode
+                // Full file view mode - simple rendering without syntax highlight to avoid freezing
                 let file_name = app
                     .git
                     .selected_tree_entry()
@@ -6885,25 +6912,12 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     .borders(Borders::ALL)
                     .border_set(ratatui::symbols::border::PLAIN)
                     .border_style(Style::default().fg(app.palette.border_inactive))
-                    .title(format!(" {} (press F for diff) ", file_name));
+                    .title(format!(" {} (F=diff) ", file_name));
 
                 let content = app.git.full_file_content.as_deref().unwrap_or("No content");
-                let ext = app
-                    .git
-                    .selected_tree_entry()
-                    .and_then(|e| std::path::Path::new(e.path.as_str()).extension())
-                    .and_then(|s| s.to_str());
 
-                let lines: Vec<Line> = if app.syntax_highlight {
-                    if let Some(ext) = ext {
-                        highlight::highlight_text(content, ext, app.palette.bg)
-                            .unwrap_or_else(|| content.lines().map(Line::raw).collect())
-                    } else {
-                        content.lines().map(Line::raw).collect()
-                    }
-                } else {
-                    content.lines().map(Line::raw).collect()
-                };
+                // Simple line rendering without syntax highlight for performance
+                let lines: Vec<Line> = content.lines().map(Line::raw).collect();
 
                 let lines_len = lines.len();
                 let viewport_h = diff_area.height.saturating_sub(2) as usize;
