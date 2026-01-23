@@ -3982,24 +3982,18 @@ impl App {
     fn check_for_updates(&mut self) {
         self.set_status("Checking for updates...");
 
-        // Query GitHub Releases API for latest version
+        // Fetch VERSION file from raw.githubusercontent.com (no API rate limit)
         let result: Result<String, String> = (|| {
-            let resp = ureq::get("https://api.github.com/repos/FanFusion/lzgit/releases/latest")
-                .set("User-Agent", "lzgit")
+            let resp = ureq::get("https://raw.githubusercontent.com/FanFusion/lzgit/main/VERSION")
                 .call()
                 .map_err(|e| format!("Network error: {}", e))?;
 
-            let json: serde_json::Value = resp.into_json()
-                .map_err(|e| format!("Parse error: {}", e))?;
+            let latest = resp.into_string()
+                .map_err(|e| format!("Read error: {}", e))?
+                .trim()
+                .to_string();
 
-            let tag = json["tag_name"]
-                .as_str()
-                .ok_or("Could not get version")?;
-
-            // Remove 'v' prefix if present
-            let latest = tag.strip_prefix('v').unwrap_or(tag);
-
-            Ok(latest.to_string())
+            Ok(latest)
         })();
 
         match result {
