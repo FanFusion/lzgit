@@ -3557,7 +3557,7 @@ impl App {
             _ if cmd.starts_with("update lzgit ") => {
                 let version = cmd.strip_prefix("update lzgit ").unwrap_or("").to_string();
                 self.start_git_job(cmd.to_string(), false, false, move || {
-                    // Try to download pre-built binary first
+                    // Download pre-built binary from GitHub Releases
                     let platform = if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
                         "linux-x86_64"
                     } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
@@ -3567,50 +3567,56 @@ impl App {
                     } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
                         "macos-aarch64"
                     } else {
-                        "" // Fall back to cargo install
+                        return Err("Unsupported platform".to_string());
                     };
 
-                    if !platform.is_empty() && !version.is_empty() {
-                        let url = format!(
-                            "https://github.com/FanFusion/lzgit/releases/download/v{}/lzgit-{}",
-                            version, platform
-                        );
+                    if version.is_empty() {
+                        return Err("No version specified".to_string());
+                    }
 
-                        if let Ok(resp) = ureq::get(&url).call() {
-                            if resp.status() == 200 {
-                                use std::io::Read;
-                                let mut bytes = Vec::new();
-                                if resp.into_reader().read_to_end(&mut bytes).is_ok() {
-                                    if let Some(home) = std::env::var_os("HOME") {
-                                        let bin_path = std::path::PathBuf::from(home)
-                                            .join(".cargo/bin/lzgit");
-                                        if std::fs::write(&bin_path, &bytes).is_ok() {
-                                            #[cfg(unix)]
-                                            {
-                                                use std::os::unix::fs::PermissionsExt;
-                                                let _ = std::fs::set_permissions(
-                                                    &bin_path,
-                                                    std::fs::Permissions::from_mode(0o755),
-                                                );
-                                            }
-                                            return Ok(());
-                                        }
-                                    }
-                                }
-                            }
+                    let url = format!(
+                        "https://github.com/FanFusion/lzgit/releases/download/v{}/lzgit-{}",
+                        version, platform
+                    );
+
+                    let resp = ureq::get(&url)
+                        .call()
+                        .map_err(|e| format!("Download failed: {}", e))?;
+
+                    if resp.status() != 200 {
+                        return Err(format!("HTTP {}", resp.status()));
+                    }
+
+                    use std::io::Read;
+                    let mut bytes = Vec::new();
+                    resp.into_reader()
+                        .read_to_end(&mut bytes)
+                        .map_err(|e| format!("Read failed: {}", e))?;
+
+                    let home = std::env::var_os("HOME")
+                        .ok_or_else(|| "HOME not set".to_string())?;
+
+                    // Install to both ~/.cargo/bin and ~/.local/bin
+                    let cargo_bin = std::path::PathBuf::from(&home).join(".cargo/bin/lzgit");
+                    let local_bin = std::path::PathBuf::from(&home).join(".local/bin/lzgit");
+
+                    for bin_path in [&cargo_bin, &local_bin] {
+                        if let Some(parent) = bin_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        std::fs::write(bin_path, &bytes)
+                            .map_err(|e| format!("Write {:?}: {}", bin_path, e))?;
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = std::fs::set_permissions(
+                                bin_path,
+                                std::fs::Permissions::from_mode(0o755),
+                            );
                         }
                     }
 
-                    // Fall back to cargo install
-                    let output = std::process::Command::new("cargo")
-                        .args(["install", "lzgit", "--force"])
-                        .output()
-                        .map_err(|e| e.to_string())?;
-                    if output.status.success() {
-                        Ok(())
-                    } else {
-                        Err(String::from_utf8_lossy(&output.stderr).to_string())
-                    }
+                    Ok(())
                 });
             }
             _ => {
