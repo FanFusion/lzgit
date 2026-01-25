@@ -6482,20 +6482,36 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     String::new()
                 };
 
-                let lines: Vec<Line> = if app.syntax_highlight {
+                // Limit preview content to avoid freezing on large files
+                let preview_limited: String = if preview_text.len() > 100_000 {
+                    let mut limited = preview_text.chars().take(100_000).collect::<String>();
+                    limited.push_str("\n\n... (file truncated, too large to preview)");
+                    limited
+                } else {
+                    preview_text
+                };
+
+                // Disable syntax highlight for very large content to avoid freezing
+                let lines: Vec<Line> = if app.syntax_highlight && preview_limited.len() < 50_000 {
                     app.selected_file()
                         .and_then(|f| {
                             if f.is_dir {
                                 return None;
                             }
                             f.path.extension().and_then(|s| s.to_str()).and_then(|ext| {
-                                highlight::highlight_text(&preview_text, ext, app.palette.bg)
+                                highlight::highlight_text(&preview_limited, ext, app.palette.bg)
                             })
                         })
-                        .unwrap_or_else(|| preview_text.lines().map(Line::raw).collect())
+                        .unwrap_or_else(|| preview_limited.lines().map(Line::raw).collect())
                 } else {
-                    preview_text.lines().map(Line::raw).collect()
+                    preview_limited.lines().map(Line::raw).collect()
                 };
+
+                // Clamp scroll to valid range
+                let viewport_h = preview_area.height.saturating_sub(2) as usize;
+                let max_scroll = lines.len().saturating_sub(viewport_h);
+                app.preview_scroll = app.preview_scroll.min(max_scroll as u16);
+
                 let p_block = Block::default()
                     .borders(Borders::ALL)
                     .border_set(ratatui::symbols::border::PLAIN)
