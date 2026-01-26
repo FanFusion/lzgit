@@ -3579,7 +3579,10 @@ impl App {
                         version, platform
                     );
 
-                    let resp = ureq::get(&url)
+                    let resp = ureq::AgentBuilder::new()
+                        .timeout(std::time::Duration::from_secs(60))
+                        .build()
+                        .get(&url)
                         .call()
                         .map_err(|e| format!("Download failed: {}", e))?;
 
@@ -3984,7 +3987,10 @@ impl App {
 
         // Fetch VERSION file from raw.githubusercontent.com (no API rate limit)
         let result: Result<String, String> = (|| {
-            let resp = ureq::get("https://raw.githubusercontent.com/FanFusion/lzgit/main/VERSION")
+            let resp = ureq::AgentBuilder::new()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .get("https://raw.githubusercontent.com/FanFusion/lzgit/main/VERSION")
                 .call()
                 .map_err(|e| format!("Network error: {}", e))?;
 
