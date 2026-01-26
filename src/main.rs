@@ -6507,10 +6507,8 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     preview_limited.lines().map(Line::raw).collect()
                 };
 
-                // Clamp scroll to valid range
-                let viewport_h = preview_area.height.saturating_sub(2) as usize;
-                let max_scroll = lines.len().saturating_sub(viewport_h);
-                app.preview_scroll = app.preview_scroll.min(max_scroll as u16);
+                // Note: Don't clamp scroll here because wrap makes actual lines > original lines
+                // The Paragraph widget handles out-of-bounds scroll gracefully
 
                 let p_block = Block::default()
                     .borders(Borders::ALL)

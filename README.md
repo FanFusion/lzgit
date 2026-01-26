@@ -37,14 +37,20 @@ This entire project is 100% written by Claude Code. My contributions:
 ## Installation
 
 ```bash
+# Linux x86_64
+curl -fsSL https://github.com/FanFusion/lzgit/releases/latest/download/lzgit-linux-x86_64 -o ~/.local/bin/lzgit && chmod +x ~/.local/bin/lzgit
+
+# Linux ARM64
+curl -fsSL https://github.com/FanFusion/lzgit/releases/latest/download/lzgit-linux-aarch64 -o ~/.local/bin/lzgit && chmod +x ~/.local/bin/lzgit
+
+# macOS Intel
+curl -fsSL https://github.com/FanFusion/lzgit/releases/latest/download/lzgit-macos-x86_64 -o /usr/local/bin/lzgit && chmod +x /usr/local/bin/lzgit
+
+# macOS Apple Silicon
+curl -fsSL https://github.com/FanFusion/lzgit/releases/latest/download/lzgit-macos-aarch64 -o /usr/local/bin/lzgit && chmod +x /usr/local/bin/lzgit
+
 # The AI era way (just ask Claude Code)
 claude "install lzgit from https://raw.githubusercontent.com/FanFusion/lzgit/main/README.md"
-
-# Pre-built binary (instant)
-cargo binstall lzgit
-
-# Or build from source (grab a coffee, this takes a few minutes)
-cargo install lzgit
 ```
 
 ## Usage
