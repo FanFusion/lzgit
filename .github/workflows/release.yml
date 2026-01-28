@@ -13,10 +13,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          # Use ubuntu-22.04 for GLIBC 2.35 compatibility
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact: lzgit-linux-x86_64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             artifact: lzgit-linux-aarch64
             cross: true
