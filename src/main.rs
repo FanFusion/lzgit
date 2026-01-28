@@ -2828,8 +2828,16 @@ impl App {
             } => {
                 self.push_git_log(cmd.clone(), &result);
 
-                if cmd == "cargo install lzgit --force" {
+                if cmd.starts_with("update lzgit ") {
                     self.update_in_progress = false;
+                    match &result {
+                        Ok(()) => {
+                            self.set_status("Update complete! Please restart lzgit.");
+                        }
+                        Err(e) => {
+                            self.set_status(format!("Update failed: {}", e));
+                        }
+                    }
                 }
 
                 if refresh {
@@ -3663,14 +3671,14 @@ impl App {
                     );
 
                     let resp = ureq::AgentBuilder::new()
-                        .timeout(std::time::Duration::from_secs(60))
+                        .timeout(std::time::Duration::from_secs(120))
                         .build()
                         .get(&url)
                         .call()
-                        .map_err(|e| format!("Download failed: {}", e))?;
+                        .map_err(|e| format!("Download failed ({}): {}", url, e))?;
 
                     if resp.status() != 200 {
-                        return Err(format!("HTTP {}", resp.status()));
+                        return Err(format!("HTTP {} from {}", resp.status(), url));
                     }
 
                     use std::io::Read;
