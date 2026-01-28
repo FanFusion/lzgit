@@ -3698,16 +3698,25 @@ impl App {
                         if let Some(parent) = bin_path.parent() {
                             let _ = std::fs::create_dir_all(parent);
                         }
-                        std::fs::write(bin_path, &bytes)
-                            .map_err(|e| format!("Write {:?}: {}", bin_path, e))?;
+
+                        // Write to temp file first, then rename (handles "text file busy")
+                        let temp_path = bin_path.with_extension("new");
+                        std::fs::write(&temp_path, &bytes)
+                            .map_err(|e| format!("Write {:?}: {}", temp_path, e))?;
+
                         #[cfg(unix)]
                         {
                             use std::os::unix::fs::PermissionsExt;
                             let _ = std::fs::set_permissions(
-                                bin_path,
+                                &temp_path,
                                 std::fs::Permissions::from_mode(0o755),
                             );
                         }
+
+                        // Remove old file first (works even if running), then rename
+                        let _ = std::fs::remove_file(bin_path);
+                        std::fs::rename(&temp_path, bin_path)
+                            .map_err(|e| format!("Rename {:?}: {}", bin_path, e))?;
                     }
 
                     Ok(())
