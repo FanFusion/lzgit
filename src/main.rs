@@ -1583,6 +1583,23 @@ struct App {
     bookmarks_path: Option<PathBuf>,
     ui_settings_path: Option<PathBuf>,
     needs_full_redraw: bool,
+
+    // Undo/Redo for file operations (revert)
+    undo_stack: Vec<UndoEntry>,
+    redo_stack: Vec<UndoEntry>,
+}
+
+/// Represents a file change that can be undone/redone
+#[derive(Clone, Debug)]
+struct UndoEntry {
+    /// Description of the operation
+    description: String,
+    /// File path (absolute)
+    file_path: PathBuf,
+    /// Content before the operation
+    old_content: String,
+    /// Content after the operation
+    new_content: String,
 }
 
 impl App {
@@ -1668,6 +1685,8 @@ impl App {
             bookmarks_path: bookmarks_file_path(),
             ui_settings_path: ui_settings_file_path(),
             needs_full_redraw: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         };
         app.load_persisted_bookmarks();
         app.load_persisted_ui_settings();
@@ -3490,13 +3509,77 @@ impl App {
             new_content.pop();
         }
 
+        // Save undo entry before writing
+        self.undo_stack.push(UndoEntry {
+            description: format!("Revert change in {}", block.file_path),
+            file_path: file_path.clone(),
+            old_content: content.clone(),
+            new_content: new_content.clone(),
+        });
+        // Clear redo stack when new action is performed
+        self.redo_stack.clear();
+        // Limit undo stack size to 50 entries
+        if self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+
         // Write the file
         if let Err(e) = std::fs::write(&file_path, &new_content) {
             self.set_status(format!("Failed to write file: {}", e));
+            // Remove the undo entry since write failed
+            self.undo_stack.pop();
             return;
         }
 
-        self.set_status("Reverted");
+        self.set_status("Reverted (Ctrl+Z to undo)");
+        self.refresh_git_state();
+    }
+
+    /// Undo the last revert operation
+    fn undo_revert(&mut self) {
+        let Some(entry) = self.undo_stack.pop() else {
+            self.set_status("Nothing to undo");
+            return;
+        };
+
+        // Write the old content back
+        if let Err(e) = std::fs::write(&entry.file_path, &entry.old_content) {
+            self.set_status(format!("Undo failed: {}", e));
+            // Put the entry back since we couldn't undo
+            self.undo_stack.push(entry);
+            return;
+        }
+
+        // Move to redo stack
+        self.redo_stack.push(entry);
+        // Limit redo stack size
+        if self.redo_stack.len() > 50 {
+            self.redo_stack.remove(0);
+        }
+
+        self.set_status("Undone (Ctrl+Shift+Z to redo)");
+        self.refresh_git_state();
+    }
+
+    /// Redo the last undone operation
+    fn redo_revert(&mut self) {
+        let Some(entry) = self.redo_stack.pop() else {
+            self.set_status("Nothing to redo");
+            return;
+        };
+
+        // Write the new content
+        if let Err(e) = std::fs::write(&entry.file_path, &entry.new_content) {
+            self.set_status(format!("Redo failed: {}", e));
+            // Put the entry back since we couldn't redo
+            self.redo_stack.push(entry);
+            return;
+        }
+
+        // Move back to undo stack
+        self.undo_stack.push(entry);
+
+        self.set_status("Redone (Ctrl+Z to undo)");
         self.refresh_git_state();
     }
 
@@ -6466,11 +6549,11 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                             String::new()
                         }
                     } else {
-                        // Read first 2KB instead of checking strict size limit
+                        // Read up to 200KB for preview (allows proper scrolling)
                         if let Ok(file_handle) = fs::File::open(&file.path) {
                             use std::io::Read;
                             let mut reader = std::io::BufReader::new(file_handle);
-                            let mut buffer = [0; 2048];
+                            let mut buffer = vec![0u8; 200 * 1024]; // 200KB max
                             if let Ok(n) = reader.read(&mut buffer) {
                                 if n == 0 {
                                     "Empty file".to_string()
@@ -10772,6 +10855,29 @@ fn main() -> io::Result<()> {
                                                     .contains(KeyModifiers::CONTROL) =>
                                             {
                                                 app.select_all_git_filtered();
+                                            }
+                                            KeyCode::Char('z')
+                                                if key
+                                                    .modifiers
+                                                    .contains(KeyModifiers::CONTROL)
+                                                    && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+                                            {
+                                                app.undo_revert();
+                                            }
+                                            KeyCode::Char('z') | KeyCode::Char('Z')
+                                                if key
+                                                    .modifiers
+                                                    .contains(KeyModifiers::CONTROL)
+                                                    && key.modifiers.contains(KeyModifiers::SHIFT) =>
+                                            {
+                                                app.redo_revert();
+                                            }
+                                            KeyCode::Char('y')
+                                                if key
+                                                    .modifiers
+                                                    .contains(KeyModifiers::CONTROL) =>
+                                            {
+                                                app.redo_revert();
                                             }
                                             KeyCode::Char('r') => app.refresh_git_state(),
                                             KeyCode::Char('i') => app.add_selected_to_gitignore(),
