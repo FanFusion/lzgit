@@ -10,3 +10,4 @@ Cargo.lock
 /bin/
 /AGENTS.md
 lzgit-linux-x86_64
+.omc/

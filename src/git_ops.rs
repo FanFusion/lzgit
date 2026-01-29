@@ -352,17 +352,32 @@ fn parse_numstat(text: &str) -> std::collections::HashMap<String, (u32, u32)> {
 pub fn list_commit_files(repo_root: &Path, hash: &str) -> Result<Vec<CommitFileChange>, String> {
     let parents = commit_parents(repo_root, hash)?;
 
-    let (name_status_args, numstat_args): (Vec<&str>, Vec<&str>) = if let Some(first_parent) = parents.first() {
-        (
-            vec!["diff", "--no-color", "--name-status", first_parent, hash],
-            vec!["diff", "--no-color", "--numstat", first_parent, hash],
-        )
-    } else {
-        (
-            vec!["show", "--no-color", "--format=", "--name-status", "--no-patch", hash],
-            vec!["show", "--no-color", "--format=", "--numstat", "--no-patch", hash],
-        )
-    };
+    let (name_status_args, numstat_args): (Vec<&str>, Vec<&str>) =
+        if let Some(first_parent) = parents.first() {
+            (
+                vec!["diff", "--no-color", "--name-status", first_parent, hash],
+                vec!["diff", "--no-color", "--numstat", first_parent, hash],
+            )
+        } else {
+            (
+                vec![
+                    "show",
+                    "--no-color",
+                    "--format=",
+                    "--name-status",
+                    "--no-patch",
+                    hash,
+                ],
+                vec![
+                    "show",
+                    "--no-color",
+                    "--format=",
+                    "--numstat",
+                    "--no-patch",
+                    hash,
+                ],
+            )
+        };
 
     // Get name-status
     let out = run_git(repo_root, &name_status_args).map_err(|e| e.to_string())?;

@@ -251,7 +251,11 @@ impl GitState {
                     let full_path = root.join(&path);
                     if full_path.is_dir() {
                         // Expand untracked directory - list all files recursively
-                        fn collect_untracked_files(dir: &std::path::Path, base: &std::path::Path, entries: &mut Vec<GitFileEntry>) {
+                        fn collect_untracked_files(
+                            dir: &std::path::Path,
+                            base: &std::path::Path,
+                            entries: &mut Vec<GitFileEntry>,
+                        ) {
                             if let Ok(read_dir) = std::fs::read_dir(dir) {
                                 for entry in read_dir.filter_map(|e| e.ok()) {
                                     let entry_path = entry.path();
@@ -359,9 +363,8 @@ impl GitState {
 
         for line in &self.diff_lines {
             // Skip meta lines for display row counting (they're filtered in unified view)
-            let is_meta = line.starts_with("index ")
-                || line.starts_with("--- ")
-                || line.starts_with("+++ ");
+            let is_meta =
+                line.starts_with("index ") || line.starts_with("--- ") || line.starts_with("+++ ");
 
             if line.starts_with("diff --git ") {
                 // Save previous hunk if any
@@ -380,7 +383,10 @@ impl GitState {
                 file_header.push(line.clone());
                 in_hunk = false;
                 display_row += 1; // diff --git line is shown
-            } else if line.starts_with("index ") || line.starts_with("--- ") || line.starts_with("+++ ") {
+            } else if line.starts_with("index ")
+                || line.starts_with("--- ")
+                || line.starts_with("+++ ")
+            {
                 file_header.push(line.clone());
                 // These are not displayed in unified view
             } else if line.starts_with("@@") {
@@ -481,7 +487,10 @@ impl GitState {
                         }
                         first_file = false;
                         row_idx += 1;
-                    } else if t.starts_with("index ") || t.starts_with("--- ") || t.starts_with("+++ ") {
+                    } else if t.starts_with("index ")
+                        || t.starts_with("--- ")
+                        || t.starts_with("+++ ")
+                    {
                         // Skipped in rendering
                     } else if t.starts_with("@@") {
                         // Finish any pending block
@@ -526,7 +535,9 @@ impl GitState {
                                     });
                                 }
                             }
-                            if new.line_no.is_some() { new_line += 1; }
+                            if new.line_no.is_some() {
+                                new_line += 1;
+                            }
                         }
                         (GitDiffCellKind::Delete, _) | (_, GitDiffCellKind::Add) => {
                             if current_block.is_none() {
@@ -550,7 +561,9 @@ impl GitState {
                             }
                         }
                         _ => {
-                            if new.line_no.is_some() { new_line += 1; }
+                            if new.line_no.is_some() {
+                                new_line += 1;
+                            }
                         }
                     }
                     row_idx += 1;
@@ -684,7 +697,11 @@ impl GitState {
         }
 
         // Helper to build directory hierarchy from file list
-        let build_section = |entries: &[usize], all_entries: &[GitFileEntry], dir_expanded: &BTreeSet<String>, section: GitSection| -> Vec<TreeNode> {
+        let build_section = |entries: &[usize],
+                             all_entries: &[GitFileEntry],
+                             dir_expanded: &BTreeSet<String>,
+                             section: GitSection|
+         -> Vec<TreeNode> {
             if entries.is_empty() {
                 return Vec::new();
             }
@@ -721,7 +738,13 @@ impl GitState {
             }
 
             // Convert DirNode to TreeNode recursively
-            fn convert_dir(name: &str, path: &str, node: DirNode, dir_expanded: &BTreeSet<String>, section: GitSection) -> TreeNode {
+            fn convert_dir(
+                name: &str,
+                path: &str,
+                node: DirNode,
+                dir_expanded: &BTreeSet<String>,
+                section: GitSection,
+            ) -> TreeNode {
                 let mut children = Vec::new();
 
                 // Add subdirectories first (sorted)
@@ -731,7 +754,13 @@ impl GitState {
                     } else {
                         format!("{}/{}", path, child_name)
                     };
-                    children.push(convert_dir(&child_name, &child_path, child_node, dir_expanded, section));
+                    children.push(convert_dir(
+                        &child_name,
+                        &child_path,
+                        child_node,
+                        dir_expanded,
+                        section,
+                    ));
                 }
 
                 // Then add files (sorted by name)
@@ -762,7 +791,13 @@ impl GitState {
 
             // Add subdirectories
             for (child_name, child_node) in root.children {
-                result.push(convert_dir(&child_name, &child_name, child_node, dir_expanded, section));
+                result.push(convert_dir(
+                    &child_name,
+                    &child_name,
+                    child_node,
+                    dir_expanded,
+                    section,
+                ));
             }
 
             // Add root-level files
@@ -780,37 +815,69 @@ impl GitState {
 
         // Build sections in order: Staged, Changes, Untracked, Conflicts
         if !staged_entries.is_empty() {
-            let children = build_section(&staged_entries, &self.entries, &self.dir_expanded, GitSection::Staged);
+            let children = build_section(
+                &staged_entries,
+                &self.entries,
+                &self.dir_expanded,
+                GitSection::Staged,
+            );
             self.tree.push(TreeNode::Section {
                 kind: GitSection::Staged,
-                expanded: *self.section_expanded.get(&GitSection::Staged).unwrap_or(&true),
+                expanded: *self
+                    .section_expanded
+                    .get(&GitSection::Staged)
+                    .unwrap_or(&true),
                 children,
             });
         }
 
         if !working_entries.is_empty() {
-            let children = build_section(&working_entries, &self.entries, &self.dir_expanded, GitSection::Working);
+            let children = build_section(
+                &working_entries,
+                &self.entries,
+                &self.dir_expanded,
+                GitSection::Working,
+            );
             self.tree.push(TreeNode::Section {
                 kind: GitSection::Working,
-                expanded: *self.section_expanded.get(&GitSection::Working).unwrap_or(&true),
+                expanded: *self
+                    .section_expanded
+                    .get(&GitSection::Working)
+                    .unwrap_or(&true),
                 children,
             });
         }
 
         if !untracked_entries.is_empty() {
-            let children = build_section(&untracked_entries, &self.entries, &self.dir_expanded, GitSection::Untracked);
+            let children = build_section(
+                &untracked_entries,
+                &self.entries,
+                &self.dir_expanded,
+                GitSection::Untracked,
+            );
             self.tree.push(TreeNode::Section {
                 kind: GitSection::Untracked,
-                expanded: *self.section_expanded.get(&GitSection::Untracked).unwrap_or(&true),
+                expanded: *self
+                    .section_expanded
+                    .get(&GitSection::Untracked)
+                    .unwrap_or(&true),
                 children,
             });
         }
 
         if !conflict_entries.is_empty() {
-            let children = build_section(&conflict_entries, &self.entries, &self.dir_expanded, GitSection::Conflicts);
+            let children = build_section(
+                &conflict_entries,
+                &self.entries,
+                &self.dir_expanded,
+                GitSection::Conflicts,
+            );
             self.tree.push(TreeNode::Section {
                 kind: GitSection::Conflicts,
-                expanded: *self.section_expanded.get(&GitSection::Conflicts).unwrap_or(&true),
+                expanded: *self
+                    .section_expanded
+                    .get(&GitSection::Conflicts)
+                    .unwrap_or(&true),
                 children,
             });
         }
@@ -829,7 +896,11 @@ impl GitState {
             out: &mut Vec<FlatTreeItem>,
         ) {
             match node {
-                TreeNode::Section { kind, expanded, children } => {
+                TreeNode::Section {
+                    kind,
+                    expanded,
+                    children,
+                } => {
                     out.push(FlatTreeItem {
                         depth,
                         node_type: FlatNodeType::Section,
@@ -851,7 +922,12 @@ impl GitState {
                         }
                     }
                 }
-                TreeNode::Directory { name, path, expanded, children } => {
+                TreeNode::Directory {
+                    name,
+                    path,
+                    expanded,
+                    children,
+                } => {
                     out.push(FlatTreeItem {
                         depth,
                         node_type: FlatNodeType::Directory,
@@ -907,8 +983,12 @@ impl GitState {
 
     /// Toggle expand/collapse for the currently selected tree item
     pub fn toggle_tree_expand(&mut self) {
-        let Some(sel) = self.tree_state.selected() else { return };
-        let Some(item) = self.flat_tree.get(sel) else { return };
+        let Some(sel) = self.tree_state.selected() else {
+            return;
+        };
+        let Some(item) = self.flat_tree.get(sel) else {
+            return;
+        };
 
         match item.node_type {
             FlatNodeType::Section => {
@@ -934,8 +1014,12 @@ impl GitState {
 
     /// Expand the currently selected tree item
     pub fn expand_tree_item(&mut self) {
-        let Some(sel) = self.tree_state.selected() else { return };
-        let Some(item) = self.flat_tree.get(sel) else { return };
+        let Some(sel) = self.tree_state.selected() else {
+            return;
+        };
+        let Some(item) = self.flat_tree.get(sel) else {
+            return;
+        };
 
         match item.node_type {
             FlatNodeType::Section => {
@@ -959,8 +1043,12 @@ impl GitState {
 
     /// Collapse the currently selected tree item
     pub fn collapse_tree_item(&mut self) {
-        let Some(sel) = self.tree_state.selected() else { return };
-        let Some(item) = self.flat_tree.get(sel) else { return };
+        let Some(sel) = self.tree_state.selected() else {
+            return;
+        };
+        let Some(item) = self.flat_tree.get(sel) else {
+            return;
+        };
 
         match item.node_type {
             FlatNodeType::Section => {
@@ -984,7 +1072,9 @@ impl GitState {
                     // Find parent directory and select it
                     for i in (0..sel).rev() {
                         if let Some(parent) = self.flat_tree.get(i) {
-                            if parent.depth < item.depth && parent.node_type == FlatNodeType::Directory {
+                            if parent.depth < item.depth
+                                && parent.node_type == FlatNodeType::Directory
+                            {
                                 self.tree_state.select(Some(i));
                                 return;
                             }
@@ -997,17 +1087,32 @@ impl GitState {
 
     fn rebuild_tree_structure(&mut self) {
         // Update the tree nodes with current expansion state
-        fn update_section(node: &mut TreeNode, section_expanded: &BTreeMap<GitSection, bool>, dir_expanded: &BTreeSet<String>) {
+        fn update_section(
+            node: &mut TreeNode,
+            section_expanded: &BTreeMap<GitSection, bool>,
+            dir_expanded: &BTreeSet<String>,
+        ) {
             match node {
-                TreeNode::Section { kind, expanded, children } => {
+                TreeNode::Section {
+                    kind,
+                    expanded,
+                    children,
+                } => {
                     *expanded = *section_expanded.get(kind).unwrap_or(&true);
                     for child in children {
                         update_section(child, section_expanded, dir_expanded);
                     }
                 }
-                TreeNode::Directory { path, expanded, children, .. } => {
+                TreeNode::Directory {
+                    path,
+                    expanded,
+                    children,
+                    ..
+                } => {
                     // dir_expanded contains COLLAPSED paths, so negate the check
-                    let collapsed_any = dir_expanded.iter().any(|k| k.ends_with(&format!(":{}", path)));
+                    let collapsed_any = dir_expanded
+                        .iter()
+                        .any(|k| k.ends_with(&format!(":{}", path)));
                     *expanded = !collapsed_any;
                     for child in children {
                         update_section(child, section_expanded, dir_expanded);
@@ -1046,7 +1151,9 @@ impl GitState {
 
     /// Get the currently selected tree item
     pub fn selected_tree_item(&self) -> Option<&FlatTreeItem> {
-        self.tree_state.selected().and_then(|i| self.flat_tree.get(i))
+        self.tree_state
+            .selected()
+            .and_then(|i| self.flat_tree.get(i))
     }
 
     /// Get the entry for the currently selected tree item (if it's a file)
