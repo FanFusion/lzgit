@@ -1184,19 +1184,10 @@ impl GitState {
                 Vec::new()
             }
             FlatNodeType::Directory => {
-                // Collect all files under this directory in the same section
-                let dir_path = &item.path;
-                let section = item.section;
-                let prefix = format!("{}/", dir_path);
-
-                self.entries
-                    .iter()
-                    .filter(|e| {
-                        let e_section = Self::entry_section(e);
-                        e_section == section && (e.path.starts_with(&prefix) || e.path == *dir_path)
-                    })
-                    .map(|e| e.path.clone())
-                    .collect()
+                // Return the directory path itself (for gitignore, stage, etc.)
+                // Adding trailing / indicates it's a directory
+                let dir_path = format!("{}/", item.path);
+                vec![dir_path]
             }
             FlatNodeType::Section => {
                 // Collect all files in this section

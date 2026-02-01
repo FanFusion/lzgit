@@ -239,8 +239,10 @@ fn render_file_list(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mut 
         )
         .highlight_symbol("▎ ");
 
-    f.render_stateful_widget(list, area, &mut app.list_state.clone());
+    // Render with the actual list_state (not cloned!) so offset is updated
+    f.render_stateful_widget(list, area, &mut app.list_state);
 
+    // Now read the offset AFTER render - ratatui adjusts it to keep selection visible
     let list_inner = area.inner(Margin {
         vertical: 1,
         horizontal: 1,

@@ -4085,6 +4085,13 @@ impl App {
             CommandId::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
                 self.load_files();
+                // Clamp selection to new file list bounds
+                if let Some(idx) = self.list_state.selected() {
+                    if idx >= self.files.len() {
+                        let new_idx = self.files.len().saturating_sub(1);
+                        self.list_state.select(Some(new_idx));
+                    }
+                }
                 self.set_status(if self.show_hidden {
                     "Hidden files: shown"
                 } else {
@@ -5149,6 +5156,13 @@ impl App {
             AppAction::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
                 self.load_files();
+                // Clamp selection to new file list bounds
+                if let Some(idx) = self.list_state.selected() {
+                    if idx >= self.files.len() {
+                        let new_idx = self.files.len().saturating_sub(1);
+                        self.list_state.select(Some(new_idx));
+                    }
+                }
             }
             AppAction::Quit => self.should_quit = true,
             AppAction::ContextMenuAction(idx) => {
@@ -8702,6 +8716,13 @@ async fn main() -> io::Result<()> {
                                     KeyCode::Char('.') => {
                                         app.show_hidden = !app.show_hidden;
                                         app.load_files();
+                                        // Clamp selection to new file list bounds
+                                        if let Some(idx) = app.list_state.selected() {
+                                            if idx >= app.files.len() {
+                                                let new_idx = app.files.len().saturating_sub(1);
+                                                app.list_state.select(Some(new_idx));
+                                            }
+                                        }
                                     }
                                     KeyCode::Char('g') => {
                                         app.list_state.select(Some(0));
