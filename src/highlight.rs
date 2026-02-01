@@ -29,7 +29,8 @@ pub struct HighlightCache {
 
 fn syntax_set() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SET.get_or_init(SyntaxSet::load_defaults_newlines)
+    // Use two-face's extended syntax set (from bat) which includes TypeScript, etc.
+    SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
 /// Create a vibrant Dracula-like theme for syntax highlighting
@@ -141,45 +142,8 @@ fn theme() -> &'static Theme {
 }
 
 pub fn is_supported_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        // Rust
-        "rs" |
-        // Python
-        "py" |
-        // JavaScript/TypeScript
-        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" |
-        // Web
-        "html" | "htm" | "css" | "scss" | "sass" | "less" |
-        // Config/Data
-        "json" | "toml" | "yaml" | "yml" | "xml" |
-        // Shell
-        "sh" | "bash" | "zsh" | "fish" |
-        // Go
-        "go" |
-        // C/C++
-        "c" | "h" | "cpp" | "hpp" | "cc" | "hh" |
-        // Java/Kotlin
-        "java" | "kt" | "kts" |
-        // Ruby
-        "rb" | "erb" |
-        // PHP
-        "php" |
-        // Lua
-        "lua" |
-        // SQL
-        "sql" |
-        // Markdown
-        "md" | "markdown" |
-        // Makefile
-        "makefile" | "mk" |
-        // Docker
-        "dockerfile" |
-        // Vim
-        "vim" |
-        // Diff/Patch
-        "diff" | "patch"
-    )
+    // Let syntect (via two-face) determine if the extension is supported
+    syntax_set().find_syntax_by_extension(ext).is_some()
 }
 
 fn clamp01(v: f32) -> f32 {
