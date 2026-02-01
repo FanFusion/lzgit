@@ -13,7 +13,7 @@ use ratatui::{
 
 use crate::git::{
     self, FlatNodeType, GitDiffCellKind, GitDiffMode, GitDiffRow, GitSection,
-    build_side_by_side_rows, display_width, pad_to_width,
+    display_width, pad_to_width,
 };
 use crate::highlight::{Highlighter, new_highlighter};
 use crate::{App, AppAction, ClickZone, DiffRenderCacheKey};
@@ -726,7 +726,7 @@ fn render_unified_diff(app: &App, diff_area: Rect) -> Vec<Line<'static>> {
 }
 
 /// Render side-by-side diff lines
-fn render_side_by_side_diff(app: &App, diff_area: Rect) -> Vec<Line<'static>> {
+fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>> {
     let inner_w = diff_area.width.saturating_sub(2) as usize;
     let sep_w = 1usize;
     let left_w = inner_w.saturating_sub(sep_w) / 2;
@@ -786,7 +786,8 @@ fn render_side_by_side_diff(app: &App, diff_area: Rect) -> Vec<Line<'static>> {
         hl_new = ext.and_then(new_highlighter);
     }
 
-    let rows = build_side_by_side_rows(&app.git.diff_lines);
+    // Use cached diff rows (rebuilt only when diff changes)
+    let rows = app.git.get_diff_rows();
     let mut first_file = true;
     for row in rows {
         match row {
@@ -795,7 +796,7 @@ fn render_side_by_side_diff(app: &App, diff_area: Rect) -> Vec<Line<'static>> {
                 if t.starts_with("@@") {
                     out.push(Line::from(vec![Span::raw("")]));
                     out.push(Line::from(vec![Span::styled(
-                        pad_to_width(t, inner_w),
+                        pad_to_width(t.clone(), inner_w),
                         Style::default()
                             .fg(app.palette.accent_secondary)
                             .bg(app.palette.diff_hunk_bg)
@@ -855,7 +856,7 @@ fn render_side_by_side_diff(app: &App, diff_area: Rect) -> Vec<Line<'static>> {
 
                 // Other meta lines (rename, etc.)
                 out.push(Line::from(vec![Span::styled(
-                    pad_to_width(t, inner_w),
+                    pad_to_width(t.clone(), inner_w),
                     Style::default().fg(app.palette.accent_secondary),
                 )]));
             }

@@ -126,6 +126,10 @@ pub struct GitState {
     pub diff_scroll_x: u16,
     pub diff_generation: u64,
     pub diff_request_id: u64,
+    /// Cached parsed diff rows (avoid re-parsing on every frame)
+    pub diff_rows_cache: Vec<GitDiffRow>,
+    /// Generation when cache was built
+    diff_rows_cache_gen: u64,
 
     /// Show full file content instead of diff
     pub show_full_file: bool,
@@ -165,10 +169,21 @@ impl GitState {
             diff_scroll_x: 0,
             diff_generation: 0,
             diff_request_id: 0,
+            diff_rows_cache: Vec::new(),
+            diff_rows_cache_gen: 0,
             show_full_file: false,
             full_file_content: None,
             full_file_scroll_y: 0,
         }
+    }
+
+    /// Get cached diff rows, rebuilding if diff has changed
+    pub fn get_diff_rows(&mut self) -> &[GitDiffRow] {
+        if self.diff_rows_cache_gen != self.diff_generation {
+            self.diff_rows_cache = build_side_by_side_rows(&self.diff_lines);
+            self.diff_rows_cache_gen = self.diff_generation;
+        }
+        &self.diff_rows_cache
     }
 
     pub fn refresh(&mut self, current_path: &Path) {

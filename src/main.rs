@@ -2,7 +2,7 @@ use arboard::Clipboard;
 use base64::{Engine as _, engine::general_purpose};
 use crossterm::{
     event::{
-        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
         KeyModifiers, MouseButton, MouseEventKind,
     },
     execute,
@@ -9664,6 +9664,20 @@ async fn main() -> io::Result<()> {
             }
             // Timeout - allows background polling to continue
             _ = &mut poll_timeout => {}
+        }
+
+        // Drain any additional pending events to prevent event queue buildup
+        // This helps when rendering is slow and events pile up
+        while event::poll(Duration::ZERO).unwrap_or(false) {
+            if let Ok(evt) = event::read() {
+                // Process mouse click events that might be waiting
+                if let Event::Mouse(mouse) = evt {
+                    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                        app.handle_click(mouse.column, mouse.row, mouse.modifiers);
+                    }
+                }
+                // Discard scroll events that piled up - they'll be stale
+            }
         }
 
         if let Some(text) = app.take_pending_clipboard() {
