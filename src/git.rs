@@ -1087,8 +1087,9 @@ impl GitState {
 
     fn rebuild_tree_structure(&mut self) {
         // Update the tree nodes with current expansion state
-        fn update_section(
+        fn update_node(
             node: &mut TreeNode,
+            current_section: GitSection,
             section_expanded: &BTreeMap<GitSection, bool>,
             dir_expanded: &BTreeSet<String>,
         ) {
@@ -1100,7 +1101,7 @@ impl GitState {
                 } => {
                     *expanded = *section_expanded.get(kind).unwrap_or(&true);
                     for child in children {
-                        update_section(child, section_expanded, dir_expanded);
+                        update_node(child, *kind, section_expanded, dir_expanded);
                     }
                 }
                 TreeNode::Directory {
@@ -1109,13 +1110,11 @@ impl GitState {
                     children,
                     ..
                 } => {
-                    // dir_expanded contains COLLAPSED paths, so negate the check
-                    let collapsed_any = dir_expanded
-                        .iter()
-                        .any(|k| k.ends_with(&format!(":{}", path)));
-                    *expanded = !collapsed_any;
+                    // Use exact key match including section prefix
+                    let key = format!("{:?}:{}", current_section, path);
+                    *expanded = !dir_expanded.contains(&key);
                     for child in children {
-                        update_section(child, section_expanded, dir_expanded);
+                        update_node(child, current_section, section_expanded, dir_expanded);
                     }
                 }
                 TreeNode::File { .. } => {}
@@ -1123,7 +1122,8 @@ impl GitState {
         }
 
         for node in &mut self.tree {
-            update_section(node, &self.section_expanded, &self.dir_expanded);
+            // Start with a dummy section, Section nodes will set the correct one
+            update_node(node, GitSection::Working, &self.section_expanded, &self.dir_expanded);
         }
 
         self.flatten_tree();
