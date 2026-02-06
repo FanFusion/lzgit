@@ -170,7 +170,7 @@ impl GitState {
             diff_generation: 0,
             diff_request_id: 0,
             diff_rows_cache: Vec::new(),
-            diff_rows_cache_gen: 0,
+            diff_rows_cache_gen: u64::MAX, // Force rebuild on first access
             show_full_file: false,
             full_file_content: None,
             full_file_scroll_y: 0,
