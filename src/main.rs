@@ -8439,7 +8439,13 @@ async fn main() -> io::Result<()> {
                 if let Ok(event) = event_result {
                     match event {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                    KeyCode::Char('q') => app.should_quit = true,
+                    KeyCode::Char('q')
+                        if app.new_branch_input.is_none()
+                            && !app.commit.open
+                            && !app.log_ui.filter_edit =>
+                    {
+                        app.should_quit = true;
+                    }
                     KeyCode::Char('1')
                         if app.operation_popup.is_none()
                             && !app.theme_picker.open
@@ -8447,6 +8453,7 @@ async fn main() -> io::Result<()> {
                             && !app.stash_ui.open
                             && app.stash_confirm.is_none()
                             && !app.branch_ui.open
+                            && app.new_branch_input.is_none()
                             && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Git;
@@ -8460,6 +8467,7 @@ async fn main() -> io::Result<()> {
                             && !app.stash_ui.open
                             && app.stash_confirm.is_none()
                             && !app.branch_ui.open
+                            && app.new_branch_input.is_none()
                             && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Log;
@@ -8472,6 +8480,7 @@ async fn main() -> io::Result<()> {
                             && !app.stash_ui.open
                             && app.stash_confirm.is_none()
                             && !app.branch_ui.open
+                            && app.new_branch_input.is_none()
                             && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Explorer;
@@ -8483,6 +8492,7 @@ async fn main() -> io::Result<()> {
                             && app.stash_confirm.is_none()
                             && !app.branch_ui.open
                             && !app.author_ui.open
+                            && app.new_branch_input.is_none()
                             && app.context_menu.is_none()
                             && !app.log_ui.inspect.open =>
                     {
@@ -8494,6 +8504,7 @@ async fn main() -> io::Result<()> {
                             && app.stash_confirm.is_none()
                             && !app.branch_ui.open
                             && !app.author_ui.open
+                            && app.new_branch_input.is_none()
                             && app.context_menu.is_none()
                             && !app.log_ui.inspect.open =>
                     {
