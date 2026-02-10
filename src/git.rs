@@ -1535,8 +1535,29 @@ pub fn render_side_by_side_cell(cell: &GitDiffCell, width: usize, scroll_x: usiz
     }
 
     let code_w = width - GUTTER;
-    let code = slice_chars(&cell.text, scroll_x, code_w);
-    format!("{}{}", gutter, pad_to_width(code, code_w))
+    let text_w = display_width(&cell.text);
+    let remaining = text_w.saturating_sub(scroll_x);
+    let truncated = remaining > code_w;
+
+    if truncated && code_w > 1 {
+        // Show truncation indicator → at end
+        let code = slice_chars(&cell.text, scroll_x, code_w - 1);
+        format!("{}{}→", gutter, pad_to_width(code, code_w - 1))
+    } else {
+        let code = slice_chars(&cell.text, scroll_x, code_w);
+        format!("{}{}", gutter, pad_to_width(code, code_w))
+    }
+}
+
+/// Check if a side-by-side cell's text is truncated at the given width
+pub fn is_cell_truncated(cell: &GitDiffCell, width: usize, scroll_x: usize) -> bool {
+    const GUTTER: usize = 6;
+    if width <= GUTTER {
+        return false;
+    }
+    let code_w = width - GUTTER;
+    let text_w = display_width(&cell.text);
+    text_w.saturating_sub(scroll_x) > code_w
 }
 
 fn wrap_text_to_width(s: &str, width: usize) -> Vec<String> {
