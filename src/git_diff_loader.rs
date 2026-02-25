@@ -147,6 +147,24 @@ async fn git_diff_loader_task(
     }
 }
 
+/// Maximum diff lines to prevent UI freeze on huge files.
+const MAX_DIFF_LINES: usize = 5000;
+/// Maximum file size (bytes) for untracked file preview.
+const MAX_UNTRACKED_SIZE: u64 = 512 * 1024; // 512KB
+
+/// Check if a file looks like binary by reading first bytes.
+fn is_likely_binary(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut buf = [0u8; 8192];
+    let Ok(n) = f.read(&mut buf) else {
+        return false;
+    };
+    buf[..n].contains(&0)
+}
+
 /// Load diff for a file (blocking I/O).
 fn load_diff(
     repo_root: &PathBuf,
@@ -158,12 +176,12 @@ fn load_diff(
         // For untracked files, read the content and format as a diff
         let file_path = repo_root.join(path);
         if file_path.is_dir() {
-            // List directory contents for untracked directories
+            // List directory contents for untracked directories (limit entries)
             match std::fs::read_dir(&file_path) {
                 Ok(entries) => {
                     let mut diff_lines =
                         vec![format!("Untracked directory: {}/", path), String::new()];
-                    for entry in entries.filter_map(|e| e.ok()) {
+                    for entry in entries.filter_map(|e| e.ok()).take(200) {
                         let name = entry.file_name().to_string_lossy().to_string();
                         let prefix = if entry.path().is_dir() { "  " } else { "  + " };
                         diff_lines.push(format!("{}{}", prefix, name));
@@ -173,19 +191,49 @@ fn load_diff(
                 Err(e) => Ok(vec![format!("Cannot read directory: {}", e)]),
             }
         } else {
+            // Check file size and binary content before reading
+            let meta = std::fs::metadata(&file_path).ok();
+            let size = meta.map(|m| m.len()).unwrap_or(0);
+
+            if size > MAX_UNTRACKED_SIZE {
+                return Ok(vec![
+                    format!("diff --git a/{} b/{}", path, path),
+                    "new file mode 100644".to_string(),
+                    String::new(),
+                    format!("File too large to preview ({:.1} KB)", size as f64 / 1024.0),
+                ]);
+            }
+
+            if is_likely_binary(&file_path) {
+                return Ok(vec![
+                    format!("diff --git a/{} b/{}", path, path),
+                    "new file mode 100644".to_string(),
+                    String::new(),
+                    format!("Binary file ({:.1} KB)", size as f64 / 1024.0),
+                ]);
+            }
+
             match std::fs::read_to_string(&file_path) {
                 Ok(content) => {
                     let lines: Vec<&str> = content.lines().collect();
-                    let line_count = lines.len();
+                    let total = lines.len();
+                    let capped = total.min(MAX_DIFF_LINES);
                     let mut diff_lines = vec![
                         format!("diff --git a/{} b/{}", path, path),
                         "new file mode 100644".to_string(),
                         "--- /dev/null".to_string(),
                         format!("+++ b/{}", path),
-                        format!("@@ -0,0 +1,{} @@", line_count),
+                        format!("@@ -0,0 +1,{} @@", total),
                     ];
-                    for line in lines {
+                    for line in lines.into_iter().take(capped) {
                         diff_lines.push(format!("+{}", line));
+                    }
+                    if total > capped {
+                        diff_lines.push(String::new());
+                        diff_lines.push(format!(
+                            "... truncated ({} more lines)",
+                            total - capped
+                        ));
                     }
                     Ok(diff_lines)
                 }
@@ -198,7 +246,16 @@ fn load_diff(
                 if text.trim().is_empty() {
                     Ok(vec!["No diff".to_string()])
                 } else {
-                    Ok(text.lines().map(|l| l.to_string()).collect())
+                    let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+                    if lines.len() > MAX_DIFF_LINES {
+                        let mut capped: Vec<String> =
+                            lines.into_iter().take(MAX_DIFF_LINES).collect();
+                        capped.push(String::new());
+                        capped.push("... diff truncated (file too large)".to_string());
+                        Ok(capped)
+                    } else {
+                        Ok(lines)
+                    }
                 }
             }
             Err(e) => Err(format!("git diff failed: {}", e)),
