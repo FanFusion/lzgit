@@ -951,17 +951,33 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         ));
                     }
 
+                    // Strip → truncation indicator before highlighting to avoid
+                    // corrupting syntect parser state
+                    let (old_hl_text, old_has_arrow) = if old_code.ends_with('→') {
+                        (&old_code[..old_code.len() - '→'.len_utf8()], true)
+                    } else {
+                        (old_code, false)
+                    };
+
                     if app.syntax_highlight
                         && old.kind != GitDiffCellKind::Empty
-                        && !old_code.trim().is_empty()
+                        && !old_hl_text.trim().is_empty()
                     {
                         if let Some(hl) = hl_old.as_mut() {
-                            spans.extend(hl.highlight_line(old_code, old_bg).spans);
+                            spans.extend(hl.highlight_line(old_hl_text, old_bg).spans);
                         } else {
-                            spans.push(Span::styled(old_code.to_string(), old_style));
+                            spans.push(Span::styled(old_hl_text.to_string(), old_style));
                         }
                     } else {
-                        spans.push(Span::styled(old_code.to_string(), old_style));
+                        spans.push(Span::styled(old_hl_text.to_string(), old_style));
+                    }
+                    if old_has_arrow {
+                        spans.push(Span::styled(
+                            "→",
+                            Style::default()
+                                .fg(app.palette.border_inactive)
+                                .bg(old_bg),
+                        ));
                     }
 
                     spans.push(Span::styled("│", sep_style));
@@ -996,17 +1012,32 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         ));
                     }
 
+                    // Strip → truncation indicator before highlighting
+                    let (new_hl_text, new_has_arrow) = if new_code.ends_with('→') {
+                        (&new_code[..new_code.len() - '→'.len_utf8()], true)
+                    } else {
+                        (new_code, false)
+                    };
+
                     if app.syntax_highlight
                         && new.kind != GitDiffCellKind::Empty
-                        && !new_code.trim().is_empty()
+                        && !new_hl_text.trim().is_empty()
                     {
                         if let Some(hl) = hl_new.as_mut() {
-                            spans.extend(hl.highlight_line(new_code, new_bg).spans);
+                            spans.extend(hl.highlight_line(new_hl_text, new_bg).spans);
                         } else {
-                            spans.push(Span::styled(new_code.to_string(), new_style));
+                            spans.push(Span::styled(new_hl_text.to_string(), new_style));
                         }
                     } else {
-                        spans.push(Span::styled(new_code.to_string(), new_style));
+                        spans.push(Span::styled(new_hl_text.to_string(), new_style));
+                    }
+                    if new_has_arrow {
+                        spans.push(Span::styled(
+                            "→",
+                            Style::default()
+                                .fg(app.palette.border_inactive)
+                                .bg(new_bg),
+                        ));
                     }
 
                     out.push(Line::from(spans));
