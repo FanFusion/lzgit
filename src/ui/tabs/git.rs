@@ -11,12 +11,61 @@ use ratatui::{
     },
 };
 
+use unicode_width::UnicodeWidthChar;
+
 use crate::git::{
     self, FlatNodeType, GitDiffCellKind, GitDiffMode, GitDiffRow, GitSection,
     display_width, pad_to_width,
 };
 use crate::highlight::{Highlighter, new_highlighter};
 use crate::{App, AppAction, ClickZone, DiffRenderCacheKey};
+
+/// Clip a sequence of styled spans to a visible column range [skip..skip+take).
+fn clip_line_spans(spans: &[Span<'_>], skip_cols: usize, take_cols: usize) -> Vec<Span<'static>> {
+    if take_cols == 0 {
+        return vec![];
+    }
+    let vis_end = skip_cols + take_cols;
+    let mut result = Vec::new();
+    let mut col = 0usize;
+
+    for span in spans {
+        let text = span.content.as_ref();
+        let span_w: usize = text
+            .chars()
+            .map(|ch| if ch == '\t' { 4 } else { UnicodeWidthChar::width(ch).unwrap_or(0) })
+            .sum();
+        let span_end = col + span_w;
+
+        if span_end <= skip_cols || col >= vis_end {
+            col = span_end;
+            continue;
+        }
+
+        let mut clipped = String::new();
+        let mut c = col;
+        for ch in text.chars() {
+            let w = if ch == '\t' { 4 } else { UnicodeWidthChar::width(ch).unwrap_or(0) };
+            if c + w <= skip_cols {
+                c += w;
+                continue;
+            }
+            if c >= vis_end || c + w > vis_end {
+                break;
+            }
+            clipped.push(ch);
+            c += w;
+        }
+
+        if !clipped.is_empty() {
+            result.push(Span::styled(clipped, span.style));
+        }
+
+        col = span_end;
+    }
+
+    result
+}
 
 /// Render the Git tab content: tree view on left, diff on right
 pub fn render_git_tab(
@@ -951,25 +1000,48 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         ));
                     }
 
-                    // Strip → truncation indicator before highlighting to avoid
-                    // corrupting syntect parser state
-                    let (old_hl_text, old_has_arrow) = if old_code.ends_with('→') {
-                        (&old_code[..old_code.len() - '→'.len_utf8()], true)
-                    } else {
-                        (old_code, false)
-                    };
+                    let old_has_arrow = old_code.ends_with('→');
 
                     if app.syntax_highlight
                         && old.kind != GitDiffCellKind::Empty
-                        && !old_hl_text.trim().is_empty()
+                        && !old.text.trim().is_empty()
                     {
                         if let Some(hl) = hl_old.as_mut() {
-                            spans.extend(hl.highlight_line(old_hl_text, old_bg).spans);
+                            if !wrap_cells {
+                                // Highlight FULL line for correct parser state,
+                                // then clip the resulting spans to visible range
+                                let full_hl = hl.highlight_line(&old.text, old_bg);
+                                let vis_w = left_w.saturating_sub(6)
+                                    .saturating_sub(if old_has_arrow { 1 } else { 0 });
+                                let clipped = clip_line_spans(&full_hl.spans, scroll_x, vis_w);
+                                let hl_w: usize = clipped.iter()
+                                    .map(|s| display_width(s.content.as_ref()))
+                                    .sum();
+                                spans.extend(clipped);
+                                if hl_w < vis_w {
+                                    spans.push(Span::styled(
+                                        " ".repeat(vis_w - hl_w),
+                                        Style::default().bg(old_bg),
+                                    ));
+                                }
+                            } else {
+                                spans.extend(hl.highlight_line(old_code, old_bg).spans);
+                            }
                         } else {
-                            spans.push(Span::styled(old_hl_text.to_string(), old_style));
+                            let plain = if old_has_arrow {
+                                &old_code[..old_code.len() - '→'.len_utf8()]
+                            } else {
+                                old_code
+                            };
+                            spans.push(Span::styled(plain.to_string(), old_style));
                         }
                     } else {
-                        spans.push(Span::styled(old_hl_text.to_string(), old_style));
+                        let plain = if old_has_arrow {
+                            &old_code[..old_code.len() - '→'.len_utf8()]
+                        } else {
+                            old_code
+                        };
+                        spans.push(Span::styled(plain.to_string(), old_style));
                     }
                     if old_has_arrow {
                         spans.push(Span::styled(
@@ -1012,24 +1084,46 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         ));
                     }
 
-                    // Strip → truncation indicator before highlighting
-                    let (new_hl_text, new_has_arrow) = if new_code.ends_with('→') {
-                        (&new_code[..new_code.len() - '→'.len_utf8()], true)
-                    } else {
-                        (new_code, false)
-                    };
+                    let new_has_arrow = new_code.ends_with('→');
 
                     if app.syntax_highlight
                         && new.kind != GitDiffCellKind::Empty
-                        && !new_hl_text.trim().is_empty()
+                        && !new.text.trim().is_empty()
                     {
                         if let Some(hl) = hl_new.as_mut() {
-                            spans.extend(hl.highlight_line(new_hl_text, new_bg).spans);
+                            if !wrap_cells {
+                                let full_hl = hl.highlight_line(&new.text, new_bg);
+                                let vis_w = right_w.saturating_sub(6)
+                                    .saturating_sub(if new_has_arrow { 1 } else { 0 });
+                                let clipped = clip_line_spans(&full_hl.spans, scroll_x, vis_w);
+                                let hl_w: usize = clipped.iter()
+                                    .map(|s| display_width(s.content.as_ref()))
+                                    .sum();
+                                spans.extend(clipped);
+                                if hl_w < vis_w {
+                                    spans.push(Span::styled(
+                                        " ".repeat(vis_w - hl_w),
+                                        Style::default().bg(new_bg),
+                                    ));
+                                }
+                            } else {
+                                spans.extend(hl.highlight_line(new_code, new_bg).spans);
+                            }
                         } else {
-                            spans.push(Span::styled(new_hl_text.to_string(), new_style));
+                            let plain = if new_has_arrow {
+                                &new_code[..new_code.len() - '→'.len_utf8()]
+                            } else {
+                                new_code
+                            };
+                            spans.push(Span::styled(plain.to_string(), new_style));
                         }
                     } else {
-                        spans.push(Span::styled(new_hl_text.to_string(), new_style));
+                        let plain = if new_has_arrow {
+                            &new_code[..new_code.len() - '→'.len_utf8()]
+                        } else {
+                            new_code
+                        };
+                        spans.push(Span::styled(plain.to_string(), new_style));
                     }
                     if new_has_arrow {
                         spans.push(Span::styled(

@@ -7099,7 +7099,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     );
                 }
                 Tab::Git => {
-                    let hint = "Ctrl+P menu  T theme  z stash  N new branch";
+                    let hint = "Ctrl+P menu  T theme  z zoom  Z stash  N new branch";
                     let w = hint.len().min(available as usize) as u16;
                     f.render_widget(
                         Paragraph::new(hint)
@@ -8944,6 +8944,11 @@ async fn main() -> io::Result<()> {
                                             KeyCode::Char('F') => app.toggle_full_file_view(),
                                             KeyCode::Char('B') => app.open_branch_picker(),
                                             KeyCode::Char('z') => {
+                                                app.git_zoom_diff = !app.git_zoom_diff;
+                                                app.git_diff_cache.invalidate();
+                                                app.save_persisted_ui_settings();
+                                            }
+                                            KeyCode::Char('Z') => {
                                                 app.quick_stash_confirm = true;
                                             }
                                             KeyCode::Char('N') => {
@@ -9308,12 +9313,7 @@ async fn main() -> io::Result<()> {
                                                 app.load_more_log_data();
                                             }
                                             KeyCode::Char('z') => {
-                                                if app.current_tab == Tab::Git {
-                                                    app.git_zoom_diff = !app.git_zoom_diff;
-                                                    app.save_persisted_ui_settings();
-                                                } else {
-                                                    app.toggle_log_zoom();
-                                                }
+                                                app.toggle_log_zoom();
                                             }
                                             KeyCode::Tab => app.cycle_log_focus(),
                                             KeyCode::Char('[') => app.adjust_log_left_width(-2),
