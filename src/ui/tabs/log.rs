@@ -14,7 +14,7 @@ use crate::git::{
     pad_to_width,
 };
 use crate::git_ops;
-use crate::highlight::{Highlighter, new_highlighter};
+use crate::highlight::{Highlighter, clip_line_spans, new_highlighter};
 use crate::theme;
 use crate::{App, AppAction, ClickZone, DiffRenderCacheKey, LogDetailMode, LogSubTab, LogZoom};
 
@@ -1021,17 +1021,56 @@ fn render_log_side_by_side_diff(
                         ));
                     }
 
+                    let old_has_arrow = old_code.ends_with('→');
+
                     if app.syntax_highlight
                         && old.kind != GitDiffCellKind::Empty
-                        && !old_code.trim().is_empty()
+                        && !old.text.trim().is_empty()
                     {
                         if let Some(hl) = hl_old.as_mut() {
-                            spans.extend(hl.highlight_line(old_code, old_bg).spans);
+                            if !wrap_cells {
+                                // Highlight FULL line for correct parser state,
+                                // then clip the resulting spans to visible range
+                                let full_hl = hl.highlight_line(&old.text, old_bg);
+                                let vis_w = left_w.saturating_sub(6)
+                                    .saturating_sub(if old_has_arrow { 1 } else { 0 });
+                                let clipped = clip_line_spans(&full_hl.spans, scroll_x, vis_w);
+                                let hl_w: usize = clipped.iter()
+                                    .map(|s| display_width(s.content.as_ref()))
+                                    .sum();
+                                spans.extend(clipped);
+                                if hl_w < vis_w {
+                                    spans.push(Span::styled(
+                                        " ".repeat(vis_w - hl_w),
+                                        Style::default().bg(old_bg),
+                                    ));
+                                }
+                            } else {
+                                spans.extend(hl.highlight_line(old_code, old_bg).spans);
+                            }
                         } else {
-                            spans.push(Span::styled(old_code.to_string(), old_style));
+                            let plain = if old_has_arrow {
+                                &old_code[..old_code.len() - '→'.len_utf8()]
+                            } else {
+                                old_code
+                            };
+                            spans.push(Span::styled(plain.to_string(), old_style));
                         }
                     } else {
-                        spans.push(Span::styled(old_code.to_string(), old_style));
+                        let plain = if old_has_arrow {
+                            &old_code[..old_code.len() - '→'.len_utf8()]
+                        } else {
+                            old_code
+                        };
+                        spans.push(Span::styled(plain.to_string(), old_style));
+                    }
+                    if old_has_arrow {
+                        spans.push(Span::styled(
+                            "→",
+                            Style::default()
+                                .fg(app.palette.border_inactive)
+                                .bg(old_bg),
+                        ));
                     }
 
                     spans.push(Span::styled("│", sep_style));
@@ -1064,17 +1103,54 @@ fn render_log_side_by_side_diff(
                         ));
                     }
 
+                    let new_has_arrow = new_code.ends_with('→');
+
                     if app.syntax_highlight
                         && new.kind != GitDiffCellKind::Empty
-                        && !new_code.trim().is_empty()
+                        && !new.text.trim().is_empty()
                     {
                         if let Some(hl) = hl_new.as_mut() {
-                            spans.extend(hl.highlight_line(new_code, new_bg).spans);
+                            if !wrap_cells {
+                                let full_hl = hl.highlight_line(&new.text, new_bg);
+                                let vis_w = right_w.saturating_sub(6)
+                                    .saturating_sub(if new_has_arrow { 1 } else { 0 });
+                                let clipped = clip_line_spans(&full_hl.spans, scroll_x, vis_w);
+                                let hl_w: usize = clipped.iter()
+                                    .map(|s| display_width(s.content.as_ref()))
+                                    .sum();
+                                spans.extend(clipped);
+                                if hl_w < vis_w {
+                                    spans.push(Span::styled(
+                                        " ".repeat(vis_w - hl_w),
+                                        Style::default().bg(new_bg),
+                                    ));
+                                }
+                            } else {
+                                spans.extend(hl.highlight_line(new_code, new_bg).spans);
+                            }
                         } else {
-                            spans.push(Span::styled(new_code.to_string(), new_style));
+                            let plain = if new_has_arrow {
+                                &new_code[..new_code.len() - '→'.len_utf8()]
+                            } else {
+                                new_code
+                            };
+                            spans.push(Span::styled(plain.to_string(), new_style));
                         }
                     } else {
-                        spans.push(Span::styled(new_code.to_string(), new_style));
+                        let plain = if new_has_arrow {
+                            &new_code[..new_code.len() - '→'.len_utf8()]
+                        } else {
+                            new_code
+                        };
+                        spans.push(Span::styled(plain.to_string(), new_style));
+                    }
+                    if new_has_arrow {
+                        spans.push(Span::styled(
+                            "→",
+                            Style::default()
+                                .fg(app.palette.border_inactive)
+                                .bg(new_bg),
+                        ));
                     }
 
                     out.push(Line::from(spans));
