@@ -11,61 +11,12 @@ use ratatui::{
     },
 };
 
-use unicode_width::UnicodeWidthChar;
-
 use crate::git::{
     self, FlatNodeType, GitDiffCellKind, GitDiffMode, GitDiffRow, GitSection,
     display_width, pad_to_width,
 };
-use crate::highlight::{Highlighter, new_highlighter};
+use crate::highlight::{Highlighter, clip_line_spans, new_highlighter};
 use crate::{App, AppAction, ClickZone, DiffRenderCacheKey};
-
-/// Clip a sequence of styled spans to a visible column range [skip..skip+take).
-fn clip_line_spans(spans: &[Span<'_>], skip_cols: usize, take_cols: usize) -> Vec<Span<'static>> {
-    if take_cols == 0 {
-        return vec![];
-    }
-    let vis_end = skip_cols + take_cols;
-    let mut result = Vec::new();
-    let mut col = 0usize;
-
-    for span in spans {
-        let text = span.content.as_ref();
-        let span_w: usize = text
-            .chars()
-            .map(|ch| if ch == '\t' { 4 } else { UnicodeWidthChar::width(ch).unwrap_or(0) })
-            .sum();
-        let span_end = col + span_w;
-
-        if span_end <= skip_cols || col >= vis_end {
-            col = span_end;
-            continue;
-        }
-
-        let mut clipped = String::new();
-        let mut c = col;
-        for ch in text.chars() {
-            let w = if ch == '\t' { 4 } else { UnicodeWidthChar::width(ch).unwrap_or(0) };
-            if c + w <= skip_cols {
-                c += w;
-                continue;
-            }
-            if c >= vis_end || c + w > vis_end {
-                break;
-            }
-            clipped.push(ch);
-            c += w;
-        }
-
-        if !clipped.is_empty() {
-            result.push(Span::styled(clipped, span.style));
-        }
-
-        col = span_end;
-    }
-
-    result
-}
 
 /// Render the Git tab content: tree view on left, diff on right
 pub fn render_git_tab(
