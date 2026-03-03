@@ -9051,11 +9051,29 @@ async fn main() -> io::Result<()> {
                                                         app.git.diff_scroll_x.saturating_add(4);
                                                 }
                                             }
-                                            KeyCode::Char('j') | KeyCode::Down => {
+                                            KeyCode::Down => {
+                                                if app.git.diff_scroll_y >= app.git.diff_max_scroll_y {
+                                                    if app.git.tree_move_to_next_file() {
+                                                        app.request_git_diff_update();
+                                                    }
+                                                } else {
+                                                    app.git.diff_scroll_y = app.git.diff_scroll_y.saturating_add(1);
+                                                }
+                                            }
+                                            KeyCode::Up => {
+                                                if app.git.diff_scroll_y == 0 {
+                                                    if app.git.tree_move_to_prev_file() {
+                                                        app.request_git_diff_update();
+                                                    }
+                                                } else {
+                                                    app.git.diff_scroll_y = app.git.diff_scroll_y.saturating_sub(1);
+                                                }
+                                            }
+                                            KeyCode::Char('j') => {
                                                 app.git.tree_move_down();
                                                 app.request_git_diff_update();
                                             }
-                                            KeyCode::Char('k') | KeyCode::Up => {
+                                            KeyCode::Char('k') => {
                                                 app.git.tree_move_up();
                                                 app.request_git_diff_update();
                                             }

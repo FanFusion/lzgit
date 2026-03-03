@@ -124,6 +124,8 @@ pub struct GitState {
     pub change_blocks: Vec<ChangeBlock>,
     pub diff_scroll_y: u16,
     pub diff_scroll_x: u16,
+    pub diff_max_scroll_y: u16,
+    pub diff_scroll_to_bottom: bool,
     pub diff_generation: u64,
     pub diff_request_id: u64,
     /// Cached parsed diff rows (avoid re-parsing on every frame)
@@ -167,6 +169,8 @@ impl GitState {
             change_blocks: Vec::new(),
             diff_scroll_y: 0,
             diff_scroll_x: 0,
+            diff_max_scroll_y: 0,
+            diff_scroll_to_bottom: false,
             diff_generation: 0,
             diff_request_id: 0,
             diff_rows_cache: Vec::new(),
@@ -1162,6 +1166,34 @@ impl GitState {
             self.diff_scroll_y = 0;
             self.diff_scroll_x = 0;
         }
+    }
+
+    /// Move to the next file node in tree view (skip sections/directories)
+    pub fn tree_move_to_next_file(&mut self) -> bool {
+        let current = self.tree_state.selected().unwrap_or(0);
+        for i in (current + 1)..self.flat_tree.len() {
+            if self.flat_tree[i].node_type == FlatNodeType::File {
+                self.tree_state.select(Some(i));
+                self.diff_scroll_y = 0;
+                self.diff_scroll_x = 0;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Move to the previous file node in tree view (skip sections/directories)
+    pub fn tree_move_to_prev_file(&mut self) -> bool {
+        let current = self.tree_state.selected().unwrap_or(0);
+        for i in (0..current).rev() {
+            if self.flat_tree[i].node_type == FlatNodeType::File {
+                self.tree_state.select(Some(i));
+                self.diff_scroll_to_bottom = true;
+                self.diff_scroll_x = 0;
+                return true;
+            }
+        }
+        false
     }
 
     /// Get the currently selected tree item

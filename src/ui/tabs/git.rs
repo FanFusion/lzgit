@@ -556,6 +556,11 @@ fn render_diff_view(app: &mut App, f: &mut Frame, diff_area: Rect, zones: &mut V
     };
     // Clamp to u16::MAX to avoid overflow, then clamp to max_y
     let max_y_u16 = max_y.min(u16::MAX as usize) as u16;
+    app.git.diff_max_scroll_y = max_y_u16;
+    if app.git.diff_scroll_to_bottom && total_lines > 0 {
+        app.git.diff_scroll_y = max_y_u16;
+        app.git.diff_scroll_to_bottom = false;
+    }
     app.git.diff_scroll_y = app.git.diff_scroll_y.min(max_y_u16);
 
     let x_scroll = if app.git.diff_mode == GitDiffMode::Unified && !wrap_unified {
@@ -771,9 +776,6 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
         git::render_side_by_side_cell_lines(cell, width, scroll_x, wrap_cells)
     };
 
-    let empty_left = " ".repeat(left_w);
-    let empty_right = " ".repeat(right_w);
-
     let mut hl_old: Option<Highlighter> = None;
     let mut hl_new: Option<Highlighter> = None;
     if app.syntax_highlight {
@@ -888,19 +890,30 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         .bg(app.palette.bg),
                 };
 
-                let old_lines = cell_lines(&old, left_w);
-                let new_lines = cell_lines(&new, right_w);
+                // When one side is empty, give full width to the content side
+                let is_old_empty = old.kind == GitDiffCellKind::Empty;
+                let is_new_empty = new.kind == GitDiffCellKind::Empty;
+                let (eff_left_w, eff_right_w) = if is_old_empty && !is_new_empty {
+                    (0usize, inner_w)
+                } else if is_new_empty && !is_old_empty {
+                    (inner_w, 0usize)
+                } else {
+                    (left_w, right_w)
+                };
+
+                let old_lines = cell_lines(&old, eff_left_w);
+                let new_lines = cell_lines(&new, eff_right_w);
                 let n = old_lines.len().max(new_lines.len());
 
                 for i in 0..n {
                     let old_cell = old_lines
                         .get(i)
                         .cloned()
-                        .unwrap_or_else(|| empty_left.clone());
+                        .unwrap_or_else(|| " ".repeat(eff_left_w));
                     let new_cell = new_lines
                         .get(i)
                         .cloned()
-                        .unwrap_or_else(|| empty_right.clone());
+                        .unwrap_or_else(|| " ".repeat(eff_right_w));
 
                     let old_bg = match old.kind {
                         GitDiffCellKind::Delete => app.palette.diff_del_bg,
@@ -913,8 +926,8 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         GitDiffCellKind::Empty => app.palette.bg,
                     };
 
-                    let old_cell = pad_to_width(old_cell, left_w);
-                    let new_cell = pad_to_width(new_cell, right_w);
+                    let old_cell = pad_to_width(old_cell, eff_left_w);
+                    let new_cell = pad_to_width(new_cell, eff_right_w);
 
                     let (old_gutter, old_code) = old_cell.split_at(old_cell.len().min(6));
                     let (new_gutter, new_code) = new_cell.split_at(new_cell.len().min(6));
@@ -962,7 +975,7 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                                 // Highlight FULL line for correct parser state,
                                 // then clip the resulting spans to visible range
                                 let full_hl = hl.highlight_line(&old.text, old_bg);
-                                let vis_w = left_w.saturating_sub(6)
+                                let vis_w = eff_left_w.saturating_sub(6)
                                     .saturating_sub(if old_has_arrow { 1 } else { 0 });
                                 let clipped = clip_line_spans(&full_hl.spans, scroll_x, vis_w);
                                 let hl_w: usize = clipped.iter()
@@ -1003,7 +1016,9 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         ));
                     }
 
-                    spans.push(Span::styled("│", sep_style));
+                    if eff_left_w > 0 && eff_right_w > 0 {
+                        spans.push(Span::styled("│", sep_style));
+                    }
 
                     // Render new gutter with colored line number and marker
                     if new_gutter.len() >= 5 {
@@ -1044,7 +1059,7 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         if let Some(hl) = hl_new.as_mut() {
                             if !wrap_cells {
                                 let full_hl = hl.highlight_line(&new.text, new_bg);
-                                let vis_w = right_w.saturating_sub(6)
+                                let vis_w = eff_right_w.saturating_sub(6)
                                     .saturating_sub(if new_has_arrow { 1 } else { 0 });
                                 let clipped = clip_line_spans(&full_hl.spans, scroll_x, vis_w);
                                 let hl_w: usize = clipped.iter()
