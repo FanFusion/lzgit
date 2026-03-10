@@ -548,11 +548,11 @@ pub fn discard_worktree_path(repo_root: &Path, path: &str) -> Result<(), String>
 }
 
 pub fn discard_untracked_path(repo_root: &Path, path: &str) -> Result<(), String> {
-    let out = run_git(repo_root, &["clean", "-f", "--", path]).map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
+    let full = repo_root.join(path);
+    if full.is_dir() {
+        std::fs::remove_dir_all(&full).map_err(|e| format!("{}: {}", path, e))
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        std::fs::remove_file(&full).map_err(|e| format!("{}: {}", path, e))
     }
 }
 
