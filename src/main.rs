@@ -3482,6 +3482,22 @@ impl App {
             return;
         };
 
+        // Untracked files: route to discard confirmation (deletes the file)
+        let is_untracked = self
+            .git
+            .entries
+            .iter()
+            .any(|e| e.path == block.file_path && e.is_untracked);
+        if is_untracked {
+            self.discard_confirm = Some(DiscardConfirm {
+                items: vec![DiscardItem {
+                    path: block.file_path,
+                    mode: DiscardMode::Untracked,
+                }],
+            });
+            return;
+        }
+
         // Direct file manipulation: replace new_lines with old_lines
         let file_path = repo_root.join(&block.file_path);
         let new_start = block.new_start as usize;
@@ -8922,6 +8938,9 @@ async fn main() -> io::Result<()> {
                                                     .contains(KeyModifiers::CONTROL) =>
                                             {
                                                 app.redo_revert();
+                                            }
+                                            KeyCode::Char('d') | KeyCode::Delete => {
+                                                app.handle_git_footer(GitFooterAction::Discard);
                                             }
                                             KeyCode::Char('r') => app.refresh_git_state(),
                                             KeyCode::Char('i') => app.add_selected_to_gitignore(),
