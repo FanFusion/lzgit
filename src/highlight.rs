@@ -286,9 +286,12 @@ impl Highlighter {
     }
 
     pub fn highlight_line(&mut self, line: &str, bg: Color) -> Line<'static> {
+        // syntect requires trailing \n for correct parser state transitions
+        // (e.g. single-line comments must see \n to end the comment scope)
+        let line_with_nl = format!("{}\n", line);
         let ranges = self
             .inner
-            .highlight_line(line, syntax_set())
+            .highlight_line(&line_with_nl, syntax_set())
             .unwrap_or_default();
         if ranges.is_empty() {
             return Line::from(Span::styled(line.to_string(), Style::default().bg(bg)));
@@ -301,8 +304,11 @@ impl Highlighter {
                     Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b),
                     bg,
                 );
+                // Strip trailing \n we added for syntect
+                let text = text.trim_end_matches('\n');
                 Span::styled(text.to_string(), Style::default().fg(fg).bg(bg))
             })
+            .filter(|s| !s.content.is_empty())
             .collect();
         Line::from(spans)
     }
@@ -317,9 +323,10 @@ impl Highlighter {
         let mut spans = Vec::new();
         spans.push(Span::styled(prefix.to_string(), prefix_style.bg(bg)));
 
+        let code_with_nl = format!("{}\n", code);
         let ranges = self
             .inner
-            .highlight_line(code, syntax_set())
+            .highlight_line(&code_with_nl, syntax_set())
             .unwrap_or_default();
         if ranges.is_empty() {
             spans.push(Span::styled(code.to_string(), Style::default().bg(bg)));
@@ -331,10 +338,13 @@ impl Highlighter {
                 Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b),
                 bg,
             );
-            spans.push(Span::styled(
-                text.to_string(),
-                Style::default().fg(fg).bg(bg),
-            ));
+            let text = text.trim_end_matches('\n');
+            if !text.is_empty() {
+                spans.push(Span::styled(
+                    text.to_string(),
+                    Style::default().fg(fg).bg(bg),
+                ));
+            }
         }
         Line::from(spans)
     }
@@ -458,5 +468,36 @@ impl HighlightCache {
     /// Get total number of lines
     pub fn line_count(&self) -> usize {
         self.lines.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_js_syntax_highlight_needs_newline() {
+        // Test: syntect expects trailing \n for correct state transitions
+        let bg = Color::Rgb(30, 30, 46);
+
+        // WITHOUT newline - parser state breaks
+        let mut hl_bad = new_highlighter("js").expect("js should be supported");
+        let _ = hl_bad.highlight_line("// comment", bg);
+        let line2_bad = hl_bad.highlight_line("if (true) {", bg);
+        let bad_colors: Vec<_> = line2_bad.spans.iter().map(|s| s.style.fg).collect();
+        eprintln!("Without \\n: {:?}", bad_colors);
+
+        // WITH newline - parser state correct
+        let mut hl_good = new_highlighter("js").expect("js should be supported");
+        let _ = hl_good.highlight_line("// comment\n", bg);
+        let line2_good = hl_good.highlight_line("if (true) {\n", bg);
+        let good_colors: Vec<_> = line2_good.spans.iter().map(|s| s.style.fg).collect();
+        eprintln!("With \\n: {:?}", good_colors);
+
+        // With \n, "if" should get keyword color (pink), not comment color
+        // There should be multiple spans with different colors
+        assert!(line2_good.spans.len() > 1,
+            "With newline, 'if (true) {{' should have multiple colored spans, got {}",
+            line2_good.spans.len());
     }
 }
