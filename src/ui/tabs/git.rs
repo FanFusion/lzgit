@@ -890,16 +890,8 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         .bg(app.palette.bg),
                 };
 
-                // When one side is empty, give full width to the content side
-                let is_old_empty = old.kind == GitDiffCellKind::Empty;
-                let is_new_empty = new.kind == GitDiffCellKind::Empty;
-                let (eff_left_w, eff_right_w) = if is_old_empty && !is_new_empty {
-                    (0usize, inner_w)
-                } else if is_new_empty && !is_old_empty {
-                    (inner_w, 0usize)
-                } else {
-                    (left_w, right_w)
-                };
+                let eff_left_w = left_w;
+                let eff_right_w = right_w;
 
                 let old_lines = cell_lines(&old, eff_left_w);
                 let new_lines = cell_lines(&new, eff_right_w);
@@ -1016,9 +1008,7 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         ));
                     }
 
-                    if eff_left_w > 0 && eff_right_w > 0 {
-                        spans.push(Span::styled("│", sep_style));
-                    }
+                    spans.push(Span::styled("│", sep_style));
 
                     // Render new gutter with colored line number and marker
                     if new_gutter.len() >= 5 {
