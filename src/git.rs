@@ -1454,6 +1454,15 @@ pub enum GitDiffRow {
     Split { old: GitDiffCell, new: GitDiffCell },
 }
 
+/// Expand tab characters to spaces (4 spaces per tab).
+/// This ensures display_width calculation matches actual terminal rendering.
+pub fn expand_tabs(s: &str) -> String {
+    if !s.contains('\t') {
+        return s.to_string();
+    }
+    s.replace('\t', "    ")
+}
+
 pub fn display_width(s: &str) -> usize {
     s.chars()
         .map(|ch| {
@@ -1844,7 +1853,7 @@ pub fn build_side_by_side_rows(lines: &[String]) -> Vec<GitDiffRow> {
                 flush(&mut rows, &mut pending_del, &mut pending_add);
                 let o = old_line;
                 let n = new_line;
-                let text = line.get(1..).unwrap_or("").to_string();
+                let text = expand_tabs(line.get(1..).unwrap_or(""));
                 rows.push(GitDiffRow::Split {
                     old: GitDiffCell {
                         line_no: o,
@@ -1868,18 +1877,18 @@ pub fn build_side_by_side_rows(lines: &[String]) -> Vec<GitDiffRow> {
                 if let Some(v) = old_line.as_mut() {
                     let ln = *v;
                     *v += 1;
-                    pending_del.push((ln, line.get(1..).unwrap_or("").to_string()));
+                    pending_del.push((ln, expand_tabs(line.get(1..).unwrap_or(""))));
                 } else {
-                    pending_del.push((0, line.get(1..).unwrap_or("").to_string()));
+                    pending_del.push((0, expand_tabs(line.get(1..).unwrap_or(""))));
                 }
             }
             '+' => {
                 if let Some(v) = new_line.as_mut() {
                     let ln = *v;
                     *v += 1;
-                    pending_add.push((ln, line.get(1..).unwrap_or("").to_string()));
+                    pending_add.push((ln, expand_tabs(line.get(1..).unwrap_or(""))));
                 } else {
-                    pending_add.push((0, line.get(1..).unwrap_or("").to_string()));
+                    pending_add.push((0, expand_tabs(line.get(1..).unwrap_or(""))));
                 }
             }
             _ => {
