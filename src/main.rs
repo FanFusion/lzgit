@@ -8470,6 +8470,7 @@ async fn main() -> io::Result<()> {
                             && app.stash_confirm.is_none()
                             && !app.branch_ui.open
                             && app.new_branch_input.is_none()
+                            && !app.commit.open
                             && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Git;
@@ -8484,6 +8485,7 @@ async fn main() -> io::Result<()> {
                             && app.stash_confirm.is_none()
                             && !app.branch_ui.open
                             && app.new_branch_input.is_none()
+                            && !app.commit.open
                             && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Log;
@@ -8497,6 +8499,7 @@ async fn main() -> io::Result<()> {
                             && app.stash_confirm.is_none()
                             && !app.branch_ui.open
                             && app.new_branch_input.is_none()
+                            && !app.commit.open
                             && app.current_tab != Tab::Terminal =>
                     {
                         app.current_tab = Tab::Explorer;
@@ -8521,6 +8524,7 @@ async fn main() -> io::Result<()> {
                             && !app.branch_ui.open
                             && !app.author_ui.open
                             && app.new_branch_input.is_none()
+                            && !app.commit.open
                             && app.context_menu.is_none()
                             && !app.log_ui.inspect.open =>
                     {
