@@ -1008,6 +1008,17 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                         ));
                     }
 
+                    // Enforce exact width for old side so separator stays aligned
+                    let old_total_w: usize = spans.iter()
+                        .map(|s| display_width(s.content.as_ref()))
+                        .sum();
+                    if old_total_w < eff_left_w {
+                        spans.push(Span::styled(
+                            " ".repeat(eff_left_w - old_total_w),
+                            Style::default().bg(old_bg),
+                        ));
+                    }
+
                     spans.push(Span::styled("│", sep_style));
 
                     // Render new gutter with colored line number and marker
@@ -1087,6 +1098,18 @@ fn render_side_by_side_diff(app: &mut App, diff_area: Rect) -> Vec<Line<'static>
                             Style::default()
                                 .fg(app.palette.border_inactive)
                                 .bg(new_bg),
+                        ));
+                    }
+
+                    // Enforce exact total width so all rows are uniform
+                    let total_w: usize = spans.iter()
+                        .map(|s| display_width(s.content.as_ref()))
+                        .sum();
+                    let expected_w = eff_left_w + 1 + eff_right_w;
+                    if total_w < expected_w {
+                        spans.push(Span::styled(
+                            " ".repeat(expected_w - total_w),
+                            Style::default().bg(new_bg),
                         ));
                     }
 
