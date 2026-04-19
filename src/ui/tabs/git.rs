@@ -75,6 +75,8 @@ fn render_tree_view(app: &mut App, f: &mut Frame, tree_area: Rect, zones: &mut V
         horizontal: 1,
     });
 
+    let tree_width = tree_inner.width as usize;
+
     // Build tree items for rendering
     let tree_items: Vec<ListItem> = app
         .git
@@ -146,6 +148,21 @@ fn render_tree_view(app: &mut App, f: &mut Frame, tree_area: Rect, zones: &mut V
 
                             let checkbox = if is_selected { "▣" } else { "□" };
 
+                            // Budget = panel width - highlight symbol (1) - indent - "▣ " (2) - "? " (2)
+                            let indent_w = display_width(&indent);
+                            let fixed_cols = 1 + indent_w + 2 + 2;
+                            let rename_suffix = e.renamed_from.as_ref().map(|from| {
+                                let base = from.rsplit('/').next().unwrap_or(from);
+                                format!(" <- {}", base)
+                            });
+                            let rename_w = rename_suffix
+                                .as_deref()
+                                .map(display_width)
+                                .unwrap_or(0);
+                            let name_budget =
+                                tree_width.saturating_sub(fixed_cols + rename_w);
+                            let display_name = truncate_name_middle(&item.name, name_budget);
+
                             let mut spans = vec![
                                 Span::raw(indent.clone()),
                                 Span::styled(
@@ -153,13 +170,12 @@ fn render_tree_view(app: &mut App, f: &mut Frame, tree_area: Rect, zones: &mut V
                                     Style::default().fg(app.palette.border_inactive),
                                 ),
                                 Span::styled(format!("{} ", status), status_style),
-                                Span::styled(&item.name, Style::default().fg(app.palette.fg)),
+                                Span::styled(display_name, Style::default().fg(app.palette.fg)),
                             ];
 
-                            if let Some(from) = &e.renamed_from {
-                                let base = from.rsplit('/').next().unwrap_or(from);
+                            if let Some(suffix) = rename_suffix {
                                 spans.push(Span::styled(
-                                    format!(" <- {}", base),
+                                    suffix,
                                     Style::default().fg(app.palette.border_inactive),
                                 ));
                             }
@@ -1180,4 +1196,73 @@ fn render_revert_buttons(app: &App, f: &mut Frame, diff_area: Rect, zones: &mut 
             }
         }
     }
+}
+
+/// Truncate a filename to fit within `max_cols` display columns, inserting `…`
+/// in the middle while preserving the extension so it stays recognizable.
+fn truncate_name_middle(name: &str, max_cols: usize) -> String {
+    if display_width(name) <= max_cols {
+        return name.to_string();
+    }
+    if max_cols == 0 {
+        return String::new();
+    }
+    if max_cols == 1 {
+        return "…".to_string();
+    }
+
+    // Find the last '.' that isn't at the very start (so dot-files stay intact).
+    let ext_start = name
+        .char_indices()
+        .filter(|(i, c)| *c == '.' && *i > 0)
+        .map(|(i, _)| i)
+        .last();
+    let ext = ext_start.map(|i| &name[i..]).unwrap_or("");
+    let ext_w = display_width(ext);
+
+    // If extension alone would fill the budget, keep the suffix end instead.
+    if ext_w + 1 >= max_cols {
+        let tail_budget = max_cols.saturating_sub(1);
+        return format!("…{}", take_suffix_cols(name, tail_budget));
+    }
+
+    let head_budget = max_cols - ext_w - 1;
+    let head = take_prefix_cols(name, head_budget);
+    format!("{}…{}", head, ext)
+}
+
+fn take_prefix_cols(s: &str, max_cols: usize) -> String {
+    let mut out = String::new();
+    let mut w = 0usize;
+    for ch in s.chars() {
+        let cw = if ch == '\t' {
+            4
+        } else {
+            unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
+        };
+        if w + cw > max_cols {
+            break;
+        }
+        out.push(ch);
+        w += cw;
+    }
+    out
+}
+
+fn take_suffix_cols(s: &str, max_cols: usize) -> String {
+    let mut stack: Vec<char> = Vec::new();
+    let mut w = 0usize;
+    for ch in s.chars().rev() {
+        let cw = if ch == '\t' {
+            4
+        } else {
+            unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
+        };
+        if w + cw > max_cols {
+            break;
+        }
+        stack.push(ch);
+        w += cw;
+    }
+    stack.into_iter().rev().collect()
 }

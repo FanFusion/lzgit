@@ -9725,7 +9725,7 @@ async fn main() -> io::Result<()> {
                 // Process mouse click events that might be waiting
                 if let Event::Mouse(mouse) = evt {
                     if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                        app.handle_click(mouse.column, mouse.row, mouse.modifiers);
+                        app.handle_click(mouse.row, mouse.column, mouse.modifiers);
                     }
                 }
                 // Discard scroll events that piled up - they'll be stale
