@@ -1165,7 +1165,7 @@ const COMMAND_PALETTE_ITEMS: &[(CommandId, &str)] = &[
     (CommandId::ToggleSyntaxHighlight, "Toggle syntax highlight"),
     (CommandId::SelectTheme, "Select theme…"),
     (CommandId::RefreshGit, "Git: refresh status"),
-    (CommandId::OpenBranchPicker, "Checkout branch…"),
+    (CommandId::OpenBranchPicker, "Checkout from…"),
     (CommandId::NewBranch, "Git: new branch…"),
     (CommandId::OpenAuthorPicker, "Filter by author…"),
     (CommandId::OpenStashPicker, "Stash…"),
@@ -6935,12 +6935,6 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     enabled,
                 ));
                 buttons.push((
-                    " Branch (B) ".to_string(),
-                    AppAction::OpenBranchPicker,
-                    app.palette.accent_tertiary,
-                    enabled,
-                ));
-                buttons.push((
                     " ✎ Commit… ".to_string(),
                     AppAction::ToggleCommitDrawer,
                     app.palette.accent_primary,
@@ -7068,7 +7062,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     );
                 }
                 Tab::Git => {
-                    let hint = "Ctrl+P menu  A/U all  N new branch  z zoom  Z stash  T theme  q quit";
+                    let hint = "Ctrl+P menu  B checkout  N new branch  A/U all  z zoom  Z stash  q quit";
                     let w = hint.len().min(available as usize) as u16;
                     f.render_widget(
                         Paragraph::new(hint)
