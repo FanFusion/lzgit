@@ -760,18 +760,35 @@ impl GitState {
             fn convert_dir(
                 name: &str,
                 path: &str,
-                node: DirNode,
+                mut node: DirNode,
                 dir_expanded: &BTreeSet<String>,
                 section: GitSection,
             ) -> TreeNode {
+                // Compact folders: while this directory has exactly one subdirectory
+                // and no files, merge it with its child so deep package paths like
+                // com/example/app/api/bean render as a single row.
+                let mut merged_name = name.to_string();
+                let mut merged_path = path.to_string();
+                while node.files.is_empty() && node.children.len() == 1 {
+                    let (child_name, child_node) =
+                        node.children.into_iter().next().unwrap();
+                    merged_name = format!("{}/{}", merged_name, child_name);
+                    merged_path = if merged_path.is_empty() {
+                        child_name.clone()
+                    } else {
+                        format!("{}/{}", merged_path, child_name)
+                    };
+                    node = child_node;
+                }
+
                 let mut children = Vec::new();
 
                 // Add subdirectories first (sorted)
                 for (child_name, child_node) in node.children {
-                    let child_path = if path.is_empty() {
+                    let child_path = if merged_path.is_empty() {
                         child_name.clone()
                     } else {
-                        format!("{}/{}", path, child_name)
+                        format!("{}/{}", merged_path, child_name)
                     };
                     children.push(convert_dir(
                         &child_name,
@@ -793,13 +810,13 @@ impl GitState {
                 }
 
                 // Full path for collapsed tracking (directories are expanded by default)
-                let full_path = format!("{:?}:{}", section, path);
+                let full_path = format!("{:?}:{}", section, merged_path);
                 // Expanded by default unless explicitly collapsed
                 let expanded = !dir_expanded.contains(&full_path);
 
                 TreeNode::Directory {
-                    name: name.to_string(),
-                    path: path.to_string(),
+                    name: merged_name,
+                    path: merged_path,
                     expanded,
                     children,
                 }
