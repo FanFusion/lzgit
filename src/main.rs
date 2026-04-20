@@ -3672,6 +3672,20 @@ impl App {
                     git_ops::push(&repo_root)
                 });
             }
+            _ if cmd.starts_with("git checkout -b ") => {
+                let name = cmd
+                    .strip_prefix("git checkout -b ")
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if name.is_empty() {
+                    self.set_status("Branch name is empty");
+                    return;
+                }
+                self.start_git_job(cmd.to_string(), refresh, false, move || {
+                    git_ops::checkout_new_branch(&repo_root, &name)
+                });
+            }
             _ if cmd.starts_with("update lzgit ") => {
                 let version = cmd.strip_prefix("update lzgit ").unwrap_or("").to_string();
                 self.start_git_job(cmd.to_string(), false, false, move || {
@@ -6841,18 +6855,6 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 app.palette.accent_secondary,
                 true,
             ));
-            buttons.push((
-                " 👁 Hidden (.) ".to_string(),
-                AppAction::ToggleHidden,
-                app.palette.accent_tertiary,
-                true,
-            ));
-            buttons.push((
-                " ✖ Quit (q) ".to_string(),
-                AppAction::Quit,
-                app.palette.btn_bg,
-                true,
-            ));
         }
         Tab::Git => {
             buttons.push((
@@ -6933,18 +6935,6 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     enabled,
                 ));
                 buttons.push((
-                    " + All (A) ".to_string(),
-                    AppAction::GitStageAllVisible,
-                    app.palette.accent_secondary,
-                    enabled,
-                ));
-                buttons.push((
-                    " - All (U) ".to_string(),
-                    AppAction::GitUnstageAllVisible,
-                    app.palette.accent_tertiary,
-                    enabled,
-                ));
-                buttons.push((
                     " Branch (B) ".to_string(),
                     AppAction::OpenBranchPicker,
                     app.palette.accent_tertiary,
@@ -6957,13 +6947,6 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     true,
                 ));
             }
-
-            buttons.push((
-                " ✖ Quit (q) ".to_string(),
-                AppAction::Quit,
-                app.palette.btn_bg,
-                true,
-            ));
         }
         Tab::Log => {
             buttons.push((
@@ -6986,39 +6969,9 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                 app.log_ui.subtab != LogSubTab::Commands,
             ));
             buttons.push((
-                " Inspect (i) ".to_string(),
-                AppAction::LogInspect,
-                app.palette.accent_secondary,
-                true,
-            ));
-            buttons.push((
                 " Zoom (z) ".to_string(),
                 AppAction::LogToggleZoom,
                 app.palette.accent_tertiary,
-                true,
-            ));
-            buttons.push((
-                " < ([) ".to_string(),
-                AppAction::LogAdjustLeft(-2),
-                app.palette.btn_bg,
-                app.log_ui.zoom == LogZoom::None,
-            ));
-            buttons.push((
-                " > (]) ".to_string(),
-                AppAction::LogAdjustLeft(2),
-                app.palette.btn_bg,
-                app.log_ui.zoom == LogZoom::None,
-            ));
-            buttons.push((
-                " Clear Cmd (x) ".to_string(),
-                AppAction::ClearGitLog,
-                app.palette.btn_bg,
-                app.log_ui.subtab == LogSubTab::Commands,
-            ));
-            buttons.push((
-                " ✖ Quit (q) ".to_string(),
-                AppAction::Quit,
-                app.palette.btn_bg,
                 true,
             ));
         }
@@ -7106,7 +7059,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         if available > 0 {
             match app.current_tab {
                 Tab::Explorer => {
-                    let hint = "Ctrl+P menu  T theme  r refresh";
+                    let hint = "Ctrl+P menu  . hidden  T theme  r refresh  q quit";
                     let w = hint.len().min(available as usize) as u16;
                     f.render_widget(
                         Paragraph::new(hint)
@@ -7115,7 +7068,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     );
                 }
                 Tab::Git => {
-                    let hint = "Ctrl+P menu  T theme  z zoom  Z stash  N new branch";
+                    let hint = "Ctrl+P menu  A/U all  N new branch  z zoom  Z stash  T theme  q quit";
                     let w = hint.len().min(available as usize) as u16;
                     f.render_widget(
                         Paragraph::new(hint)

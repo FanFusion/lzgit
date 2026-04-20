@@ -786,6 +786,15 @@ pub fn checkout_branch(repo_root: &Path, branch: &str) -> Result<(), String> {
     }
 }
 
+pub fn checkout_new_branch(repo_root: &Path, branch: &str) -> Result<(), String> {
+    let out = run_git(repo_root, &["checkout", "-b", branch]).map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 pub fn checkout_branch_entry(repo_root: &Path, branch: &BranchEntry) -> Result<(), String> {
     if !branch.is_remote {
         return checkout_branch(repo_root, branch.name.as_str());
