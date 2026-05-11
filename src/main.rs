@@ -9493,16 +9493,11 @@ async fn main() -> io::Result<()> {
                                             app.git.diff_scroll_y =
                                                 app.git.diff_scroll_y.saturating_add(3);
                                         }
-                                    } else {
-                                        let i = app.git.list_state.selected().unwrap_or(0);
-                                        let next =
-                                            (i + 3).min(app.git.filtered.len().saturating_sub(1));
-                                        if app.git.filtered.is_empty() {
-                                            app.git.list_state.select(None);
-                                        } else {
-                                            app.git.select_filtered(next);
-                                            app.request_git_diff_update();
+                                    } else if !app.git.flat_tree.is_empty() {
+                                        for _ in 0..3 {
+                                            app.git.tree_move_down();
                                         }
+                                        app.request_git_diff_update();
                                     }
                                 }
                                 Tab::Log => {
@@ -9587,15 +9582,11 @@ async fn main() -> io::Result<()> {
                                             app.git.diff_scroll_y =
                                                 app.git.diff_scroll_y.saturating_sub(3);
                                         }
-                                    } else {
-                                        let i = app.git.list_state.selected().unwrap_or(0);
-                                        if i >= 3 {
-                                            app.git.select_filtered(i - 3);
-                                            app.request_git_diff_update();
-                                        } else if !app.git.filtered.is_empty() {
-                                            app.git.select_filtered(0);
-                                            app.request_git_diff_update();
+                                    } else if !app.git.flat_tree.is_empty() {
+                                        for _ in 0..3 {
+                                            app.git.tree_move_up();
                                         }
+                                        app.request_git_diff_update();
                                     }
                                 }
                                 Tab::Log => {
