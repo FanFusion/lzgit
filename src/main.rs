@@ -5926,6 +5926,7 @@ impl App {
         match git_ops::add_to_gitignore(&repo_root, &patterns) {
             Ok(0) => {
                 self.set_status("Already ignored");
+                self.refresh_git_state();
             }
             Ok(n) => {
                 self.set_status(format!("Added {} to .gitignore", n));
