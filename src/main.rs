@@ -7350,7 +7350,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
             && let Some(pending) = app.branch_ui.confirm_checkout.as_deref()
         {
             let w = modal.width.min(70).saturating_sub(2).max(40);
-            let h = 7u16.min(modal.height.saturating_sub(2)).max(7);
+            let h = 7;
             let x = modal.x + (modal.width.saturating_sub(w)) / 2;
             let y = modal.y + (modal.height.saturating_sub(h)) / 2;
             let confirm = Rect::new(x, y, w, h);
@@ -7536,7 +7536,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
 
         if let Some((action, selector)) = app.stash_confirm.as_ref() {
             let w = modal.width.min(70).saturating_sub(2).max(44);
-            let h = 7u16.min(modal.height.saturating_sub(2)).max(7);
+            let h = 7;
             let x = modal.x + (modal.width.saturating_sub(w)) / 2;
             let y = modal.y + (modal.height.saturating_sub(h)) / 2;
             let confirm = Rect::new(x, y, w, h);
@@ -7610,7 +7610,7 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
         });
 
         let w = area.width.min(70).saturating_sub(2).max(44);
-        let h = 7u16.min(area.height.saturating_sub(2)).max(7);
+        let h = 7;
         let x = area.x + (area.width.saturating_sub(w)) / 2;
         let y = area.y + (area.height.saturating_sub(h)) / 2;
         let confirm = Rect::new(x, y, w, h);
