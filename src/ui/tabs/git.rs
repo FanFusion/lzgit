@@ -6,14 +6,14 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        Wrap,
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Wrap,
     },
 };
 
 use crate::git::{
-    self, FlatNodeType, GitDiffCellKind, GitDiffMode, GitDiffRow, GitSection,
-    display_width, pad_to_width,
+    self, FlatNodeType, GitDiffCellKind, GitDiffMode, GitDiffRow, GitSection, display_width,
+    pad_to_width,
 };
 use crate::highlight::{Highlighter, clip_line_spans, new_highlighter};
 use crate::{App, AppAction, ClickZone, DiffRenderCacheKey};
@@ -63,11 +63,43 @@ pub fn render_git_tab(
 fn render_tree_view(app: &mut App, f: &mut Frame, tree_area: Rect, zones: &mut Vec<ClickZone>) {
     let (staged, working, untracked, conflicts) = app.git.section_counts();
     let total = staged + working + untracked + conflicts;
-    let tree_block = Block::default()
+
+    let selected_full_path = app
+        .git
+        .tree_state
+        .selected()
+        .and_then(|sel| app.git.flat_tree.get(sel))
+        .and_then(|item| match item.node_type {
+            FlatNodeType::File => item
+                .entry_idx
+                .and_then(|idx| app.git.entries.get(idx))
+                .map(|e| e.path.clone()),
+            FlatNodeType::Directory => Some(item.path.clone()),
+            FlatNodeType::Section => None,
+        });
+
+    let mut tree_block = Block::default()
         .borders(Borders::ALL)
         .border_set(ratatui::symbols::border::PLAIN)
         .border_style(Style::default().fg(app.palette.accent_primary))
         .title(format!(" Git ({}) ", total));
+
+    if let Some(path) = selected_full_path {
+        let budget = (tree_area.width as usize).saturating_sub(4);
+        if budget > 0 {
+            let display = if display_width(&path) <= budget {
+                path
+            } else {
+                format!("…{}", take_suffix_cols(&path, budget.saturating_sub(1)))
+            };
+            tree_block = tree_block.title_bottom(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(display, Style::default().fg(app.palette.border_inactive)),
+                Span::raw(" "),
+            ]));
+        }
+    }
+
     f.render_widget(tree_block.clone(), tree_area);
 
     let tree_inner = tree_area.inner(Margin {
@@ -76,11 +108,46 @@ fn render_tree_view(app: &mut App, f: &mut Frame, tree_area: Rect, zones: &mut V
     });
 
     let tree_width = tree_inner.width as usize;
+    let viewport_h = tree_inner.height as usize;
+    let total_items = app.git.flat_tree.len();
 
-    // Build tree items for rendering
+    if total_items == 0 {
+        app.git.tree_state.select(None);
+        *app.git.tree_state.offset_mut() = 0;
+    } else if app
+        .git
+        .tree_state
+        .selected()
+        .is_some_and(|sel| sel >= total_items)
+    {
+        app.git.tree_state.select(Some(total_items - 1));
+    }
+
+    let selected = app.git.tree_state.selected();
+    let max_offset = total_items.saturating_sub(viewport_h);
+    let mut start_index = app.git.tree_state.offset().min(max_offset);
+
+    if let Some(sel) = selected {
+        if sel < start_index {
+            start_index = sel;
+        } else if sel >= start_index.saturating_add(viewport_h) {
+            start_index = sel.saturating_add(1).saturating_sub(viewport_h);
+        }
+        start_index = start_index.min(max_offset);
+    } else {
+        start_index = 0;
+    }
+
+    *app.git.tree_state.offset_mut() = start_index;
+    let end_index = start_index.saturating_add(viewport_h).min(total_items);
+
+    // Build only the visible tree items. Large repos can have 100k+ flat tree
+    // rows, and allocating ListItems for all of them on every frame blocks input.
     let tree_items: Vec<ListItem> = app
         .git
         .flat_tree
+        .get(start_index..end_index)
+        .unwrap_or(&[])
         .iter()
         .map(|item| {
             let indent = "  ".repeat(item.depth);
@@ -198,6 +265,11 @@ fn render_tree_view(app: &mut App, f: &mut Frame, tree_area: Rect, zones: &mut V
         })
         .collect();
 
+    let visible_len = tree_items.len();
+    let selected_in_window = selected
+        .and_then(|sel| sel.checked_sub(start_index))
+        .filter(|sel| *sel < visible_len);
+
     let tree_list = List::new(tree_items)
         .highlight_style(
             Style::default()
@@ -206,11 +278,10 @@ fn render_tree_view(app: &mut App, f: &mut Frame, tree_area: Rect, zones: &mut V
         )
         .highlight_symbol("▎");
 
-    f.render_stateful_widget(tree_list, tree_inner, &mut app.git.tree_state.clone());
+    let mut render_state = ListState::default().with_selected(selected_in_window);
+    f.render_stateful_widget(tree_list, tree_inner, &mut render_state);
 
     // Add click zones for tree items
-    let start_index = app.git.tree_state.offset();
-    let end_index = (start_index + tree_inner.height as usize).min(app.git.flat_tree.len());
     for (i, idx) in (start_index..end_index).enumerate() {
         let rect = Rect::new(tree_inner.x, tree_inner.y + i as u16, tree_inner.width, 1);
         zones.push(ClickZone {
@@ -220,14 +291,14 @@ fn render_tree_view(app: &mut App, f: &mut Frame, tree_area: Rect, zones: &mut V
     }
 
     // Scrollbar for tree
-    if app.git.flat_tree.len() > tree_inner.height as usize {
+    if total_items > viewport_h {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("▴"))
             .end_symbol(Some("▾"))
             .track_symbol(Some("│"))
             .thumb_symbol("║");
-        let mut scroll_state = ScrollbarState::new(app.git.flat_tree.len())
-            .position(app.git.tree_state.selected().unwrap_or(0));
+        let mut scroll_state =
+            ScrollbarState::new(total_items).position(app.git.tree_state.selected().unwrap_or(0));
         f.render_stateful_widget(
             scrollbar,
             tree_area.inner(Margin {
