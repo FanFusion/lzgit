@@ -5,7 +5,6 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-use unicode_width::UnicodeWidthChar;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GitSection {
@@ -129,8 +128,10 @@ pub struct GitState {
     pub diff_generation: u64,
     pub diff_request_id: u64,
     /// Cached parsed diff rows (avoid re-parsing on every frame)
+    #[allow(dead_code)]
     pub diff_rows_cache: Vec<GitDiffRow>,
     /// Generation when cache was built
+    #[allow(dead_code)]
     diff_rows_cache_gen: u64,
 
     /// Show full file content instead of diff
@@ -182,6 +183,7 @@ impl GitState {
     }
 
     /// Get cached diff rows, rebuilding if diff has changed
+    #[allow(dead_code)]
     pub fn get_diff_rows(&mut self) -> &[GitDiffRow] {
         if self.diff_rows_cache_gen != self.diff_generation {
             self.diff_rows_cache = build_side_by_side_rows(&self.diff_lines);
@@ -379,12 +381,9 @@ impl GitState {
         let mut file_header: Vec<String> = Vec::new();
         let mut in_hunk = false;
         let mut display_row: usize = 0;
+        let mut first_file = true;
 
         for line in &self.diff_lines {
-            // Skip meta lines for display row counting (they're filtered in unified view)
-            let is_meta =
-                line.starts_with("index ") || line.starts_with("--- ") || line.starts_with("+++ ");
-
             if line.starts_with("diff --git ") {
                 // Save previous hunk if any
                 if in_hunk && !current_hunk_lines.is_empty() {
@@ -401,13 +400,14 @@ impl GitState {
                 file_header.clear();
                 file_header.push(line.clone());
                 in_hunk = false;
+                if !first_file {
+                    display_row += 2; // blank + file separator
+                }
+                first_file = false;
                 display_row += 1; // diff --git line is shown
-            } else if line.starts_with("index ")
-                || line.starts_with("--- ")
-                || line.starts_with("+++ ")
-            {
+            } else if is_diff_metadata_line(line) {
                 file_header.push(line.clone());
-                // These are not displayed in unified view
+                display_row += 1;
             } else if line.starts_with("@@") {
                 // Save previous hunk if any
                 if in_hunk && !current_hunk_lines.is_empty() {
@@ -421,6 +421,7 @@ impl GitState {
                 }
 
                 // Start new hunk
+                display_row += 1; // blank spacer before every hunk header
                 current_hunk_start_display = display_row;
                 current_hunk_lines.clear();
                 current_hunk_lines.push(line.clone());
@@ -428,10 +429,8 @@ impl GitState {
                 display_row += 1;
             } else if in_hunk {
                 current_hunk_lines.push(line.clone());
-                if !is_meta {
-                    display_row += 1;
-                }
-            } else if !is_meta {
+                display_row += 1;
+            } else {
                 display_row += 1;
             }
         }
@@ -453,6 +452,7 @@ impl GitState {
 
     /// Compute side-by-side display row indices and change blocks
     fn compute_sbs_hunk_rows(&mut self) {
+        use crate::diff::side_by_side::parse_hunk_header;
         use crate::git::build_side_by_side_rows;
 
         self.change_blocks.clear();
@@ -506,11 +506,8 @@ impl GitState {
                         }
                         first_file = false;
                         row_idx += 1;
-                    } else if t.starts_with("index ")
-                        || t.starts_with("--- ")
-                        || t.starts_with("+++ ")
-                    {
-                        // Skipped in rendering
+                    } else if is_diff_metadata_line(t) {
+                        row_idx += 1;
                     } else if t.starts_with("@@") {
                         // Finish any pending block
                         if let Some(block) = current_block.take() {
@@ -605,6 +602,7 @@ impl GitState {
     }
 
     /// Get the hunk index at or before a given display row
+    #[allow(dead_code)]
     pub fn hunk_at_display_row(&self, row: usize) -> Option<usize> {
         let mut result = None;
         for (i, hunk) in self.diff_hunks.iter().enumerate() {
@@ -617,6 +615,7 @@ impl GitState {
         result
     }
 
+    #[allow(dead_code)]
     pub fn selected_entry(&self) -> Option<&GitFileEntry> {
         let sel = self.list_state.selected()?;
         let abs = *self.filtered.get(sel)?;
@@ -770,8 +769,7 @@ impl GitState {
                 let mut merged_name = name.to_string();
                 let mut merged_path = path.to_string();
                 while node.files.is_empty() && node.children.len() == 1 {
-                    let (child_name, child_node) =
-                        node.children.into_iter().next().unwrap();
+                    let (child_name, child_node) = node.children.into_iter().next().unwrap();
                     merged_name = format!("{}/{}", merged_name, child_name);
                     merged_path = if merged_path.is_empty() {
                         child_name.clone()
@@ -1159,7 +1157,12 @@ impl GitState {
 
         for node in &mut self.tree {
             // Start with a dummy section, Section nodes will set the correct one
-            update_node(node, GitSection::Working, &self.section_expanded, &self.dir_expanded);
+            update_node(
+                node,
+                GitSection::Working,
+                &self.section_expanded,
+                &self.dir_expanded,
+            );
         }
 
         self.flatten_tree();
@@ -1365,6 +1368,7 @@ impl GitState {
     }
 
     /// Expand all directories
+    #[allow(dead_code)]
     pub fn expand_all(&mut self) {
         // Expand all sections
         self.section_expanded.insert(GitSection::Staged, true);
@@ -1379,6 +1383,7 @@ impl GitState {
     }
 
     /// Collapse all directories
+    #[allow(dead_code)]
     pub fn collapse_all(&mut self) {
         // dir_expanded stores COLLAPSED paths, so add all dir paths
         fn collect_dirs(node: &TreeNode, section: GitSection, out: &mut BTreeSet<String>) {
@@ -1430,6 +1435,18 @@ fn is_conflict_status(x: char, y: char) -> bool {
     )
 }
 
+fn is_diff_metadata_line(line: &str) -> bool {
+    line.starts_with("index ")
+        || line.starts_with("--- ")
+        || line.starts_with("+++ ")
+        || line.starts_with("rename ")
+        || line.starts_with("new file ")
+        || line.starts_with("deleted file ")
+        || line.starts_with("similarity index ")
+        || line.starts_with("Binary files ")
+        || line.starts_with("\\ No newline")
+}
+
 fn entry_sort_key(e: &GitFileEntry) -> (u8, String) {
     if e.is_conflict {
         return (0, e.path.clone());
@@ -1450,471 +1467,44 @@ fn entry_sort_key(e: &GitFileEntry) -> (u8, String) {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GitDiffCellKind {
-    Context,
-    Delete,
-    Add,
-    Empty,
-}
+pub use crate::diff::{
+    GitDiffCellKind, GitDiffRow, build_side_by_side_rows, display_width, pad_to_width, slice_chars,
+};
 
-#[derive(Clone, Debug)]
-pub struct GitDiffCell {
-    pub line_no: Option<u32>,
-    pub text: String,
-    pub kind: GitDiffCellKind,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[derive(Clone, Debug)]
-pub enum GitDiffRow {
-    Meta(String),
-    Split { old: GitDiffCell, new: GitDiffCell },
-}
-
-/// Expand tab characters to spaces (4 spaces per tab).
-/// This ensures display_width calculation matches actual terminal rendering.
-pub fn expand_tabs(s: &str) -> String {
-    if !s.contains('\t') {
-        return s.to_string();
-    }
-    s.replace('\t', "    ")
-}
-
-pub fn display_width(s: &str) -> usize {
-    s.chars()
-        .map(|ch| {
-            if ch == '\t' {
-                4
-            } else {
-                UnicodeWidthChar::width(ch).unwrap_or(0)
-            }
-        })
-        .sum()
-}
-
-pub fn slice_chars(s: &str, start: usize, max_len: usize) -> String {
-    if max_len == 0 {
-        return String::new();
+    fn row_mapping_fixture() -> Vec<String> {
+        vec![
+            "diff --git a/main.rs b/main.rs".to_string(),
+            "index 1111111..2222222 100644".to_string(),
+            "--- a/main.rs".to_string(),
+            "+++ b/main.rs".to_string(),
+            "@@ -10,3 +20,3 @@ fn demo() {".to_string(),
+            " context();".to_string(),
+            "-let color = \"red\";".to_string(),
+            "+let color = \"blue\";".to_string(),
+        ]
     }
 
-    let mut out = String::new();
-    let mut col = 0usize;
-    let mut taken = 0usize;
+    #[test]
+    fn diff_hunk_rows_match_rendered_unified_metadata_spacing() {
+        let mut state = GitState::new();
+        state.set_diff_lines(row_mapping_fixture());
 
-    for ch in s.chars() {
-        let w = if ch == '\t' {
-            4
-        } else {
-            UnicodeWidthChar::width(ch).unwrap_or(0)
-        };
-
-        if col + w <= start {
-            col += w;
-            continue;
-        }
-
-        if taken + w > max_len {
-            break;
-        }
-
-        out.push(ch);
-        taken += w;
-        col += w;
-
-        if taken >= max_len {
-            break;
-        }
+        assert_eq!(state.diff_hunks.len(), 1);
+        // file header + index/---/+++ + blank spacer, then the hunk header.
+        assert_eq!(state.diff_hunks[0].display_row, 5);
     }
 
-    out
-}
+    #[test]
+    fn side_by_side_revert_rows_count_rendered_metadata() {
+        let mut state = GitState::new();
+        state.set_diff_lines(row_mapping_fixture());
 
-pub fn truncate_to_width(s: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
+        assert_eq!(state.diff_hunks[0].sbs_display_row, 6);
+        assert_eq!(state.change_blocks.len(), 1);
+        assert_eq!(state.change_blocks[0].display_row, 8);
     }
-
-    let mut out = String::new();
-    let mut wsum = 0usize;
-
-    for ch in s.chars() {
-        let w = if ch == '\t' {
-            4
-        } else {
-            UnicodeWidthChar::width(ch).unwrap_or(0)
-        };
-        if wsum + w > width {
-            break;
-        }
-        out.push(ch);
-        wsum += w;
-        if wsum >= width {
-            break;
-        }
-    }
-
-    out
-}
-
-pub fn pad_to_width(mut s: String, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-
-    let w = display_width(&s);
-    if w >= width {
-        return truncate_to_width(&s, width);
-    }
-
-    s.push_str(&" ".repeat(width - w));
-    s
-}
-
-pub fn render_side_by_side_cell(cell: &GitDiffCell, width: usize, scroll_x: usize) -> String {
-    const GUTTER: usize = 6;
-    if width == 0 {
-        return String::new();
-    }
-
-    let marker = match cell.kind {
-        GitDiffCellKind::Add => '+',
-        GitDiffCellKind::Delete => '-',
-        _ => ' ',
-    };
-
-    let gutter = if let Some(n) = cell.line_no {
-        format!("{:>4}{} ", n, marker)
-    } else {
-        "      ".to_string()
-    };
-
-    if width <= GUTTER {
-        return truncate_to_width(&gutter, width);
-    }
-
-    let code_w = width - GUTTER;
-    let text_w = display_width(&cell.text);
-    let remaining = text_w.saturating_sub(scroll_x);
-    let truncated = remaining > code_w;
-
-    if truncated && code_w > 1 {
-        // Show truncation indicator → at end
-        let code = slice_chars(&cell.text, scroll_x, code_w - 1);
-        format!("{}{}→", gutter, pad_to_width(code, code_w - 1))
-    } else {
-        let code = slice_chars(&cell.text, scroll_x, code_w);
-        format!("{}{}", gutter, pad_to_width(code, code_w))
-    }
-}
-
-/// Check if a side-by-side cell's text is truncated at the given width
-pub fn is_cell_truncated(cell: &GitDiffCell, width: usize, scroll_x: usize) -> bool {
-    const GUTTER: usize = 6;
-    if width <= GUTTER {
-        return false;
-    }
-    let code_w = width - GUTTER;
-    let text_w = display_width(&cell.text);
-    text_w.saturating_sub(scroll_x) > code_w
-}
-
-fn wrap_text_to_width(s: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![String::new()];
-    }
-
-    if display_width(s) <= width {
-        return vec![s.to_string()];
-    }
-
-    let width_of = |ch: char| -> usize {
-        if ch == '\t' {
-            4
-        } else {
-            UnicodeWidthChar::width(ch).unwrap_or(0)
-        }
-    };
-
-    let items: Vec<(usize, char, usize)> = s
-        .char_indices()
-        .map(|(i, ch)| (i, ch, width_of(ch)))
-        .collect();
-
-    let mut out = Vec::new();
-    let mut i = 0usize;
-
-    while i < items.len() {
-        let start_byte = items[i].0;
-        let mut wsum = 0usize;
-        let mut j = i;
-        let mut last_break: Option<usize> = None;
-
-        while j < items.len() {
-            let (_b, ch, w) = items[j];
-
-            if ch.is_whitespace() || matches!(ch, '-' | '/' | ',' | '.' | ';' | ':') {
-                last_break = Some(j + 1);
-            }
-
-            if wsum > 0 && wsum + w > width {
-                break;
-            }
-
-            wsum += w;
-            j += 1;
-
-            if wsum >= width {
-                break;
-            }
-        }
-
-        if j >= items.len() {
-            let seg = s[start_byte..].trim_end_matches(|c: char| c.is_whitespace());
-            out.push(seg.to_string());
-            break;
-        }
-
-        let split_j = last_break.filter(|b| *b > i && *b <= j).unwrap_or(j);
-        let end_byte = items.get(split_j).map(|t| t.0).unwrap_or(s.len());
-        let seg = s[start_byte..end_byte].trim_end_matches(|c: char| c.is_whitespace());
-        out.push(seg.to_string());
-
-        i = split_j;
-        while i < items.len() && items[i].1.is_whitespace() {
-            i += 1;
-        }
-    }
-
-    if out.is_empty() {
-        out.push(String::new());
-    }
-
-    out
-}
-
-pub fn render_side_by_side_cell_lines(
-    cell: &GitDiffCell,
-    width: usize,
-    scroll_x: usize,
-    wrap: bool,
-) -> Vec<String> {
-    const GUTTER: usize = 6;
-
-    if width == 0 {
-        return vec![String::new()];
-    }
-
-    if !wrap {
-        return vec![render_side_by_side_cell(cell, width, scroll_x)];
-    }
-
-    let marker = match cell.kind {
-        GitDiffCellKind::Add => '+',
-        GitDiffCellKind::Delete => '-',
-        _ => ' ',
-    };
-
-    let gutter_first = if let Some(n) = cell.line_no {
-        format!("{:>4}{} ", n, marker)
-    } else {
-        "      ".to_string()
-    };
-
-    if width <= GUTTER {
-        return vec![truncate_to_width(&gutter_first, width)];
-    }
-
-    let code_w = width - GUTTER;
-
-    let indent_bytes = cell
-        .text
-        .char_indices()
-        .take_while(|(_i, c)| c.is_whitespace())
-        .last()
-        .map(|(i, c)| i + c.len_utf8())
-        .unwrap_or(0);
-
-    let (indent, mut rest) = cell.text.split_at(indent_bytes);
-    let mut indent_w = display_width(indent);
-
-    if indent_w >= code_w {
-        rest = cell.text.as_str();
-        indent_w = 0;
-    }
-
-    let avail = code_w.saturating_sub(indent_w);
-    let mut out = Vec::new();
-
-    let mut lines = wrap_text_to_width(rest, avail);
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-
-    for (idx, seg) in lines.into_iter().enumerate() {
-        let gutter = if idx == 0 {
-            gutter_first.clone()
-        } else {
-            "      ".to_string()
-        };
-
-        let code = if indent_w > 0 {
-            format!("{}{}", indent, seg)
-        } else {
-            seg
-        };
-
-        out.push(format!("{}{}", gutter, pad_to_width(code, code_w)));
-    }
-
-    out
-}
-
-fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
-    let trimmed = line.trim();
-    let Some(rest) = trimmed.strip_prefix("@@") else {
-        return None;
-    };
-    let rest = rest.trim_start();
-    let Some((range, _)) = rest.split_once("@@") else {
-        return None;
-    };
-    let mut it = range.trim().split_whitespace();
-    let old_tok = it.next()?;
-    let new_tok = it.next()?;
-
-    let old_start = old_tok.strip_prefix('-')?.split(',').next()?.parse().ok()?;
-    let new_start = new_tok.strip_prefix('+')?.split(',').next()?.parse().ok()?;
-
-    Some((old_start, new_start))
-}
-
-pub fn build_side_by_side_rows(lines: &[String]) -> Vec<GitDiffRow> {
-    let mut rows = Vec::new();
-
-    let mut old_line: Option<u32> = None;
-    let mut new_line: Option<u32> = None;
-
-    let mut pending_del: Vec<(u32, String)> = Vec::new();
-    let mut pending_add: Vec<(u32, String)> = Vec::new();
-
-    let flush = |rows: &mut Vec<GitDiffRow>,
-                 pending_del: &mut Vec<(u32, String)>,
-                 pending_add: &mut Vec<(u32, String)>| {
-        let n = pending_del.len().max(pending_add.len());
-        for i in 0..n {
-            let old = if let Some((ln, t)) = pending_del.get(i) {
-                GitDiffCell {
-                    line_no: Some(*ln),
-                    text: t.clone(),
-                    kind: GitDiffCellKind::Delete,
-                }
-            } else {
-                GitDiffCell {
-                    line_no: None,
-                    text: String::new(),
-                    kind: GitDiffCellKind::Empty,
-                }
-            };
-            let new = if let Some((ln, t)) = pending_add.get(i) {
-                GitDiffCell {
-                    line_no: Some(*ln),
-                    text: t.clone(),
-                    kind: GitDiffCellKind::Add,
-                }
-            } else {
-                GitDiffCell {
-                    line_no: None,
-                    text: String::new(),
-                    kind: GitDiffCellKind::Empty,
-                }
-            };
-            rows.push(GitDiffRow::Split { old, new });
-        }
-        pending_del.clear();
-        pending_add.clear();
-    };
-
-    for line in lines {
-        if line.starts_with("diff --git ")
-            || line.starts_with("index ")
-            || line.starts_with("--- ")
-            || line.starts_with("+++ ")
-            || line.starts_with("rename ")
-            || line.starts_with("new file ")
-            || line.starts_with("deleted file ")
-            || line.starts_with("similarity index ")
-            || line.starts_with("Binary files ")
-            || line.starts_with("\\ No newline")
-        {
-            flush(&mut rows, &mut pending_del, &mut pending_add);
-            rows.push(GitDiffRow::Meta(line.clone()));
-            continue;
-        }
-
-        if line.starts_with("@@") {
-            flush(&mut rows, &mut pending_del, &mut pending_add);
-            rows.push(GitDiffRow::Meta(line.clone()));
-            if let Some((o, n)) = parse_hunk_header(line) {
-                old_line = Some(o);
-                new_line = Some(n);
-            }
-            continue;
-        }
-
-        let Some(first) = line.chars().next() else {
-            continue;
-        };
-
-        match first {
-            ' ' => {
-                flush(&mut rows, &mut pending_del, &mut pending_add);
-                let o = old_line;
-                let n = new_line;
-                let text = expand_tabs(line.get(1..).unwrap_or(""));
-                rows.push(GitDiffRow::Split {
-                    old: GitDiffCell {
-                        line_no: o,
-                        text: text.clone(),
-                        kind: GitDiffCellKind::Context,
-                    },
-                    new: GitDiffCell {
-                        line_no: n,
-                        text,
-                        kind: GitDiffCellKind::Context,
-                    },
-                });
-                if let Some(v) = old_line.as_mut() {
-                    *v += 1;
-                }
-                if let Some(v) = new_line.as_mut() {
-                    *v += 1;
-                }
-            }
-            '-' => {
-                if let Some(v) = old_line.as_mut() {
-                    let ln = *v;
-                    *v += 1;
-                    pending_del.push((ln, expand_tabs(line.get(1..).unwrap_or(""))));
-                } else {
-                    pending_del.push((0, expand_tabs(line.get(1..).unwrap_or(""))));
-                }
-            }
-            '+' => {
-                if let Some(v) = new_line.as_mut() {
-                    let ln = *v;
-                    *v += 1;
-                    pending_add.push((ln, expand_tabs(line.get(1..).unwrap_or(""))));
-                } else {
-                    pending_add.push((0, expand_tabs(line.get(1..).unwrap_or(""))));
-                }
-            }
-            _ => {
-                flush(&mut rows, &mut pending_del, &mut pending_add);
-                rows.push(GitDiffRow::Meta(line.clone()));
-            }
-        }
-    }
-
-    flush(&mut rows, &mut pending_del, &mut pending_add);
-    rows
 }

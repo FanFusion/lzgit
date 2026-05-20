@@ -41,11 +41,13 @@ impl PreviewCache {
     }
 
     /// Invalidate (remove) a specific path from the cache.
+    #[allow(dead_code)]
     pub fn invalidate(&self, path: &PathBuf) {
         self.cache.write().pop(path);
     }
 
     /// Clear the entire cache.
+    #[allow(dead_code)]
     pub fn clear(&self) {
         self.cache.write().clear();
     }

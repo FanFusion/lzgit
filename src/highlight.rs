@@ -3,7 +3,6 @@ use ratatui::{
     text::{Line, Span},
 };
 use std::{collections::HashMap, sync::OnceLock};
-use unicode_width::UnicodeWidthChar;
 use syntect::{
     easy::HighlightLines,
     highlighting::{
@@ -13,6 +12,7 @@ use syntect::{
     parsing::SyntaxSet,
     util::LinesWithEndings,
 };
+use unicode_width::UnicodeWidthChar;
 
 pub struct Highlighter {
     inner: HighlightLines<'static>,
@@ -37,15 +37,60 @@ fn syntax_set() -> &'static SyntaxSet {
 /// Create a vibrant Dracula-like theme for syntax highlighting
 fn create_vibrant_theme() -> Theme {
     // Dracula-inspired vibrant colors
-    let pink = SyntectColor { r: 255, g: 121, b: 198, a: 255 };      // #FF79C6 - keywords
-    let cyan = SyntectColor { r: 139, g: 233, b: 253, a: 255 };      // #8BE9FD - functions/types
-    let green = SyntectColor { r: 80, g: 250, b: 123, a: 255 };      // #50FA7B - strings
-    let yellow = SyntectColor { r: 241, g: 250, b: 140, a: 255 };    // #F1FA8C - classes
-    let orange = SyntectColor { r: 255, g: 184, b: 108, a: 255 };    // #FFB86C - numbers/constants
-    let purple = SyntectColor { r: 189, g: 147, b: 249, a: 255 };    // #BD93F9 - variables
-    let red = SyntectColor { r: 255, g: 85, b: 85, a: 255 };         // #FF5555 - errors
-    let comment = SyntectColor { r: 98, g: 114, b: 164, a: 255 };    // #6272A4 - comments
-    let fg = SyntectColor { r: 248, g: 248, b: 242, a: 255 };        // #F8F8F2 - foreground
+    let pink = SyntectColor {
+        r: 255,
+        g: 121,
+        b: 198,
+        a: 255,
+    }; // #FF79C6 - keywords
+    let cyan = SyntectColor {
+        r: 139,
+        g: 233,
+        b: 253,
+        a: 255,
+    }; // #8BE9FD - functions/types
+    let green = SyntectColor {
+        r: 80,
+        g: 250,
+        b: 123,
+        a: 255,
+    }; // #50FA7B - strings
+    let yellow = SyntectColor {
+        r: 241,
+        g: 250,
+        b: 140,
+        a: 255,
+    }; // #F1FA8C - classes
+    let orange = SyntectColor {
+        r: 255,
+        g: 184,
+        b: 108,
+        a: 255,
+    }; // #FFB86C - numbers/constants
+    let purple = SyntectColor {
+        r: 189,
+        g: 147,
+        b: 249,
+        a: 255,
+    }; // #BD93F9 - variables
+    let red = SyntectColor {
+        r: 255,
+        g: 85,
+        b: 85,
+        a: 255,
+    }; // #FF5555 - errors
+    let comment = SyntectColor {
+        r: 98,
+        g: 114,
+        b: 164,
+        a: 255,
+    }; // #6272A4 - comments
+    let fg = SyntectColor {
+        r: 248,
+        g: 248,
+        b: 242,
+        a: 255,
+    }; // #F8F8F2 - foreground
 
     fn scope(s: &str) -> ScopeSelectors {
         s.parse().unwrap_or_default()
@@ -85,54 +130,159 @@ fn create_vibrant_theme() -> Theme {
         },
         scopes: vec![
             // Comments - italic gray-blue
-            ThemeItem { scope: scope("comment"), style: style_italic(comment) },
+            ThemeItem {
+                scope: scope("comment"),
+                style: style_italic(comment),
+            },
             // Strings - bright green
-            ThemeItem { scope: scope("string"), style: style(green) },
+            ThemeItem {
+                scope: scope("string"),
+                style: style(green),
+            },
             // Numbers - bright orange
-            ThemeItem { scope: scope("constant.numeric"), style: style(orange) },
+            ThemeItem {
+                scope: scope("constant.numeric"),
+                style: style(orange),
+            },
             // Constants - bright orange
-            ThemeItem { scope: scope("constant"), style: style(orange) },
-            ThemeItem { scope: scope("constant.language"), style: style(purple) },
+            ThemeItem {
+                scope: scope("constant"),
+                style: style(orange),
+            },
+            ThemeItem {
+                scope: scope("constant.language"),
+                style: style(purple),
+            },
             // Keywords - bright pink (bold)
-            ThemeItem { scope: scope("keyword"), style: style_bold(pink) },
-            ThemeItem { scope: scope("keyword.control"), style: style_bold(pink) },
-            ThemeItem { scope: scope("keyword.operator"), style: style(pink) },
-            ThemeItem { scope: scope("storage"), style: style_bold(pink) },
-            ThemeItem { scope: scope("storage.type"), style: style_bold(cyan) },
-            ThemeItem { scope: scope("storage.modifier"), style: style_bold(pink) },
+            ThemeItem {
+                scope: scope("keyword"),
+                style: style_bold(pink),
+            },
+            ThemeItem {
+                scope: scope("keyword.control"),
+                style: style_bold(pink),
+            },
+            ThemeItem {
+                scope: scope("keyword.operator"),
+                style: style(pink),
+            },
+            ThemeItem {
+                scope: scope("storage"),
+                style: style_bold(pink),
+            },
+            ThemeItem {
+                scope: scope("storage.type"),
+                style: style_bold(cyan),
+            },
+            ThemeItem {
+                scope: scope("storage.modifier"),
+                style: style_bold(pink),
+            },
             // Functions - bright cyan
-            ThemeItem { scope: scope("entity.name.function"), style: style(cyan) },
-            ThemeItem { scope: scope("support.function"), style: style(cyan) },
-            ThemeItem { scope: scope("meta.function-call"), style: style(cyan) },
+            ThemeItem {
+                scope: scope("entity.name.function"),
+                style: style(cyan),
+            },
+            ThemeItem {
+                scope: scope("support.function"),
+                style: style(cyan),
+            },
+            ThemeItem {
+                scope: scope("meta.function-call"),
+                style: style(cyan),
+            },
             // Types/Classes - bright yellow
-            ThemeItem { scope: scope("entity.name.type"), style: style(yellow) },
-            ThemeItem { scope: scope("entity.name.class"), style: style(yellow) },
-            ThemeItem { scope: scope("support.type"), style: style(yellow) },
-            ThemeItem { scope: scope("support.class"), style: style(yellow) },
-            ThemeItem { scope: scope("entity.other.inherited-class"), style: style(yellow) },
+            ThemeItem {
+                scope: scope("entity.name.type"),
+                style: style(yellow),
+            },
+            ThemeItem {
+                scope: scope("entity.name.class"),
+                style: style(yellow),
+            },
+            ThemeItem {
+                scope: scope("support.type"),
+                style: style(yellow),
+            },
+            ThemeItem {
+                scope: scope("support.class"),
+                style: style(yellow),
+            },
+            ThemeItem {
+                scope: scope("entity.other.inherited-class"),
+                style: style(yellow),
+            },
             // Variables - bright purple
-            ThemeItem { scope: scope("variable"), style: style(purple) },
-            ThemeItem { scope: scope("variable.parameter"), style: style_italic(orange) },
-            ThemeItem { scope: scope("variable.other"), style: style(fg) },
+            ThemeItem {
+                scope: scope("variable"),
+                style: style(purple),
+            },
+            ThemeItem {
+                scope: scope("variable.parameter"),
+                style: style_italic(orange),
+            },
+            ThemeItem {
+                scope: scope("variable.other"),
+                style: style(fg),
+            },
             // Punctuation - foreground
-            ThemeItem { scope: scope("punctuation"), style: style(fg) },
+            ThemeItem {
+                scope: scope("punctuation"),
+                style: style(fg),
+            },
             // Operators - pink
-            ThemeItem { scope: scope("keyword.operator"), style: style(pink) },
+            ThemeItem {
+                scope: scope("keyword.operator"),
+                style: style(pink),
+            },
             // Tags (HTML/XML) - pink
-            ThemeItem { scope: scope("entity.name.tag"), style: style(pink) },
-            ThemeItem { scope: scope("entity.other.attribute-name"), style: style(green) },
+            ThemeItem {
+                scope: scope("entity.name.tag"),
+                style: style(pink),
+            },
+            ThemeItem {
+                scope: scope("entity.other.attribute-name"),
+                style: style(green),
+            },
             // Markdown
-            ThemeItem { scope: scope("markup.heading"), style: style_bold(purple) },
-            ThemeItem { scope: scope("markup.bold"), style: style_bold(orange) },
-            ThemeItem { scope: scope("markup.italic"), style: style_italic(yellow) },
-            ThemeItem { scope: scope("markup.raw"), style: style(green) },
-            ThemeItem { scope: scope("markup.underline.link"), style: style(cyan) },
+            ThemeItem {
+                scope: scope("markup.heading"),
+                style: style_bold(purple),
+            },
+            ThemeItem {
+                scope: scope("markup.bold"),
+                style: style_bold(orange),
+            },
+            ThemeItem {
+                scope: scope("markup.italic"),
+                style: style_italic(yellow),
+            },
+            ThemeItem {
+                scope: scope("markup.raw"),
+                style: style(green),
+            },
+            ThemeItem {
+                scope: scope("markup.underline.link"),
+                style: style(cyan),
+            },
             // Invalid/Error - red
-            ThemeItem { scope: scope("invalid"), style: style(red) },
+            ThemeItem {
+                scope: scope("invalid"),
+                style: style(red),
+            },
             // Rust specific
-            ThemeItem { scope: scope("entity.name.lifetime"), style: style_italic(pink) },
-            ThemeItem { scope: scope("entity.name.module"), style: style(cyan) },
-            ThemeItem { scope: scope("support.macro"), style: style(cyan) },
+            ThemeItem {
+                scope: scope("entity.name.lifetime"),
+                style: style_italic(pink),
+            },
+            ThemeItem {
+                scope: scope("entity.name.module"),
+                style: style(cyan),
+            },
+            ThemeItem {
+                scope: scope("support.macro"),
+                style: style(cyan),
+            },
         ],
     }
 }
@@ -224,6 +374,7 @@ pub fn new_highlighter(ext: &str) -> Option<Highlighter> {
     })
 }
 
+#[allow(dead_code)]
 pub fn highlight_text(text: &str, ext: &str, bg: Color) -> Option<Vec<Line<'static>>> {
     let mut hl = new_highlighter(ext)?;
     Some(hl.highlight_lines(text, bg))
@@ -231,6 +382,7 @@ pub fn highlight_text(text: &str, ext: &str, bg: Color) -> Option<Vec<Line<'stat
 
 /// Highlight only a specific range of lines from the text
 /// This is the optimized version that only processes visible lines
+#[allow(dead_code)]
 pub fn highlight_text_range(
     text: &str,
     ext: &str,
@@ -243,6 +395,7 @@ pub fn highlight_text_range(
 }
 
 impl Highlighter {
+    #[allow(dead_code)]
     pub fn highlight_lines(&mut self, text: &str, bg: Color) -> Vec<Line<'static>> {
         let mut out = Vec::new();
         for raw in LinesWithEndings::from(text) {
@@ -257,6 +410,7 @@ impl Highlighter {
 
     /// Highlight only a range of lines from the text
     /// This is optimized for rendering only visible lines
+    #[allow(dead_code)]
     pub fn highlight_lines_range(
         &mut self,
         text: &str,
@@ -313,6 +467,7 @@ impl Highlighter {
         Line::from(spans)
     }
 
+    #[allow(dead_code)]
     pub fn highlight_diff_code_with_prefix(
         &mut self,
         prefix: &str,
@@ -351,7 +506,12 @@ impl Highlighter {
 }
 
 /// Clip a sequence of styled spans to a visible column range [skip..skip+take).
-pub fn clip_line_spans(spans: &[Span<'_>], skip_cols: usize, take_cols: usize) -> Vec<Span<'static>> {
+#[allow(dead_code)]
+pub fn clip_line_spans(
+    spans: &[Span<'_>],
+    skip_cols: usize,
+    take_cols: usize,
+) -> Vec<Span<'static>> {
     if take_cols == 0 {
         return vec![];
     }
@@ -363,7 +523,13 @@ pub fn clip_line_spans(spans: &[Span<'_>], skip_cols: usize, take_cols: usize) -
         let text = span.content.as_ref();
         let span_w: usize = text
             .chars()
-            .map(|ch| if ch == '\t' { 4 } else { UnicodeWidthChar::width(ch).unwrap_or(0) })
+            .map(|ch| {
+                if ch == '\t' {
+                    4
+                } else {
+                    UnicodeWidthChar::width(ch).unwrap_or(0)
+                }
+            })
             .sum();
         let span_end = col + span_w;
 
@@ -375,7 +541,11 @@ pub fn clip_line_spans(spans: &[Span<'_>], skip_cols: usize, take_cols: usize) -
         let mut clipped = String::new();
         let mut c = col;
         for ch in text.chars() {
-            let w = if ch == '\t' { 4 } else { UnicodeWidthChar::width(ch).unwrap_or(0) };
+            let w = if ch == '\t' {
+                4
+            } else {
+                UnicodeWidthChar::width(ch).unwrap_or(0)
+            };
             if c + w <= skip_cols {
                 c += w;
                 continue;
@@ -461,6 +631,7 @@ impl HighlightCache {
     }
 
     /// Clear the cache (e.g., when bg color changes or file content changes)
+    #[allow(dead_code)]
     pub fn clear_cache(&mut self) {
         self.cache.clear();
     }
@@ -496,8 +667,10 @@ mod tests {
 
         // With \n, "if" should get keyword color (pink), not comment color
         // There should be multiple spans with different colors
-        assert!(line2_good.spans.len() > 1,
+        assert!(
+            line2_good.spans.len() > 1,
             "With newline, 'if (true) {{' should have multiple colored spans, got {}",
-            line2_good.spans.len());
+            line2_good.spans.len()
+        );
     }
 }

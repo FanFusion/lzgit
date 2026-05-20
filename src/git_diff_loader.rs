@@ -27,15 +27,9 @@ pub enum GitDiffRequest {
 #[derive(Debug)]
 pub enum GitDiffResult {
     /// Successfully loaded diff lines.
-    Ready {
-        request_id: u64,
-        lines: Vec<String>,
-    },
+    Ready { request_id: u64, lines: Vec<String> },
     /// Error occurred while loading.
-    Error {
-        request_id: u64,
-        error: String,
-    },
+    Error { request_id: u64, error: String },
     /// Load was cancelled.
     Cancelled,
 }
@@ -230,10 +224,7 @@ fn load_diff(
                     }
                     if total > capped {
                         diff_lines.push(String::new());
-                        diff_lines.push(format!(
-                            "... truncated ({} more lines)",
-                            total - capped
-                        ));
+                        diff_lines.push(format!("... truncated ({} more lines)", total - capped));
                     }
                     Ok(diff_lines)
                 }

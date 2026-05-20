@@ -1,3 +1,25 @@
+#![allow(
+    clippy::collapsible_else_if,
+    clippy::collapsible_if,
+    clippy::collapsible_match,
+    clippy::double_ended_iterator_last,
+    clippy::extend_with_drain,
+    clippy::get_first,
+    clippy::if_same_then_else,
+    clippy::iter_cloned_collect,
+    clippy::manual_clamp,
+    clippy::manual_div_ceil,
+    clippy::manual_range_contains,
+    clippy::needless_borrows_for_generic_args,
+    clippy::nonminimal_bool,
+    clippy::ptr_arg,
+    clippy::redundant_closure_call,
+    clippy::too_many_arguments,
+    clippy::unnecessary_lazy_evaluations,
+    clippy::unnecessary_map_or,
+    clippy::vec_init_then_push
+)]
+
 use arboard::Clipboard;
 use base64::{Engine as _, engine::general_purpose};
 use crossterm::{
@@ -56,6 +78,7 @@ fn is_newer_version(new: &str, current: &str) -> bool {
 mod branch;
 mod commit;
 mod conflict;
+mod diff;
 mod git;
 mod git_diff_loader;
 mod git_ops;
@@ -117,6 +140,8 @@ mod theme {
         pub diff_add_bg: Color,
         pub diff_del_bg: Color,
         pub diff_hunk_bg: Color,
+        pub diff_add_inline_bg: Color,
+        pub diff_del_inline_bg: Color,
         pub diff_add_fg: Color,
         pub diff_del_fg: Color,
         pub diff_gutter_fg: Color,
@@ -144,6 +169,7 @@ mod theme {
 
     pub fn palette(theme: Theme) -> Palette {
         let diff_alpha = 0.20;
+        let diff_inline_alpha = 0.44;
         let hunk_alpha = 0.12;
 
         match theme {
@@ -183,6 +209,8 @@ mod theme {
                     diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
                     diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_inline_bg: tint(bg, diff_add_tint, diff_inline_alpha),
+                    diff_del_inline_bg: tint(bg, diff_del_tint, diff_inline_alpha),
                     diff_add_fg: Color::Rgb(148, 226, 213), // Teal for + sign
                     diff_del_fg: Color::Rgb(243, 139, 168), // Red/pink for - sign
                     diff_gutter_fg: Color::Rgb(108, 112, 134), // Muted gray for line numbers
@@ -223,6 +251,8 @@ mod theme {
                     diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
                     diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_inline_bg: tint(bg, diff_add_tint, diff_inline_alpha),
+                    diff_del_inline_bg: tint(bg, diff_del_tint, diff_inline_alpha),
                     diff_add_fg: Color::Rgb(115, 218, 202), // Cyan/teal for + sign
                     diff_del_fg: Color::Rgb(247, 118, 142), // Red for - sign
                     diff_gutter_fg: Color::Rgb(86, 95, 137), // Muted gray
@@ -263,6 +293,8 @@ mod theme {
                     diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
                     diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_inline_bg: tint(bg, diff_add_tint, diff_inline_alpha),
+                    diff_del_inline_bg: tint(bg, diff_del_tint, diff_inline_alpha),
                     diff_add_fg: Color::Rgb(142, 192, 124), // Aqua for + sign
                     diff_del_fg: Color::Rgb(251, 73, 52),   // Red for - sign
                     diff_gutter_fg: Color::Rgb(146, 131, 116), // Muted gray
@@ -303,6 +335,8 @@ mod theme {
                     diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
                     diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_inline_bg: tint(bg, diff_add_tint, diff_inline_alpha),
+                    diff_del_inline_bg: tint(bg, diff_del_tint, diff_inline_alpha),
                     diff_add_fg: Color::Rgb(136, 192, 208), // Frost cyan for + sign
                     diff_del_fg: Color::Rgb(191, 97, 106),  // Aurora red for - sign
                     diff_gutter_fg: Color::Rgb(76, 86, 106), // Muted gray
@@ -343,6 +377,8 @@ mod theme {
                     diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
                     diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_inline_bg: tint(bg, diff_add_tint, diff_inline_alpha),
+                    diff_del_inline_bg: tint(bg, diff_del_tint, diff_inline_alpha),
                     diff_add_fg: Color::Rgb(139, 233, 253), // Cyan for + sign
                     diff_del_fg: Color::Rgb(255, 121, 198), // Pink for - sign
                     diff_gutter_fg: Color::Rgb(98, 114, 164), // Muted gray
@@ -384,6 +420,8 @@ mod theme {
                     diff_add_bg: tint(bg, diff_add_tint, diff_alpha),
                     diff_del_bg: tint(bg, diff_del_tint, diff_alpha),
                     diff_hunk_bg: tint(bg, accent_primary, hunk_alpha),
+                    diff_add_inline_bg: tint(bg, diff_add_tint, diff_inline_alpha),
+                    diff_del_inline_bg: tint(bg, diff_del_tint, diff_inline_alpha),
                     diff_add_fg: Color::Rgb(86, 182, 194), // Cyan for + sign
                     diff_del_fg: Color::Rgb(224, 108, 117), // Red for - sign
                     diff_gutter_fg: Color::Rgb(92, 99, 112), // Muted gray
@@ -425,6 +463,7 @@ enum BranchPickerMode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[allow(dead_code)]
 enum AppAction {
     SwitchTab(Tab),
     RefreshGit,
@@ -660,6 +699,7 @@ impl TerminalState {
         }
     }
 
+    #[allow(dead_code)]
     fn resize(&mut self, cols: u16, rows: u16) {
         self.parser.set_size(rows, cols);
     }
@@ -738,9 +778,9 @@ pub(crate) enum LogZoom {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub(crate) enum ExplorerZoom {
     #[default]
-    ThreeColumn,  // Parent | Current | Preview
-    TwoColumn,    // Current | Preview
-    PreviewOnly,  // Full preview
+    ThreeColumn, // Parent | Current | Preview
+    TwoColumn,   // Current | Preview
+    PreviewOnly, // Full preview
 }
 
 struct InspectUi {
@@ -1625,6 +1665,7 @@ pub(crate) struct App {
 #[derive(Clone, Debug)]
 struct UndoEntry {
     /// Description of the operation
+    #[allow(dead_code)]
     description: String,
     /// File path (absolute)
     file_path: PathBuf,
@@ -1838,13 +1879,9 @@ impl App {
         let staged = entry.x != ' ' && entry.x != '?';
 
         // Use async git diff loader
-        let cancel_token = self.git_diff_loader.request_diff(
-            repo_root,
-            path,
-            is_untracked,
-            staged,
-            request_id,
-        );
+        let cancel_token =
+            self.git_diff_loader
+                .request_diff(repo_root, path, is_untracked, staged, request_id);
         self.git_diff_cancel_token = Some(cancel_token);
     }
 
@@ -7063,7 +7100,8 @@ fn draw_ui(f: &mut Frame, app: &mut App) -> Vec<ClickZone> {
                     );
                 }
                 Tab::Git => {
-                    let hint = "Ctrl+P menu  B checkout  N new branch  A/U all  z zoom  Z stash  q quit";
+                    let hint =
+                        "Ctrl+P menu  B checkout  N new branch  A/U all  z zoom  Z stash  q quit";
                     let w = hint.len().min(available as usize) as u16;
                     f.render_widget(
                         Paragraph::new(hint)

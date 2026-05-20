@@ -30,6 +30,7 @@ pub struct StashEntry {
 pub struct CommitFileChange {
     pub status: String,
     pub path: String,
+    #[allow(dead_code)]
     pub old_path: Option<String>,
     pub additions: Option<u32>,
     pub deletions: Option<u32>,

@@ -5,17 +5,17 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{
+        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
+    },
 };
 use std::time::Instant;
 
-use crate::git::{
-    self, GitDiffCellKind, GitDiffMode, GitDiffRow, build_side_by_side_rows, display_width,
-    pad_to_width,
-};
+use crate::git::{GitDiffMode, display_width};
 use crate::git_ops;
-use crate::highlight::{Highlighter, clip_line_spans, new_highlighter};
 use crate::theme;
+use crate::ui::diff_render::{DiffRenderConfig, render_diff};
 use crate::{App, AppAction, ClickZone, DiffRenderCacheKey, LogDetailMode, LogSubTab, LogZoom};
 
 /// Render the Log tab content: subtab selector, commit list, and diff view
@@ -249,10 +249,14 @@ fn render_log_list(app: &mut App, f: &mut Frame, list_area: Rect, zones: &mut Ve
             .end_symbol(Some("▾"))
             .track_symbol(Some("│"))
             .thumb_symbol("█");
-        let mut scroll_state = ScrollbarState::new(list_max_scroll).position(selected_idx.min(list_max_scroll));
+        let mut scroll_state =
+            ScrollbarState::new(list_max_scroll).position(selected_idx.min(list_max_scroll));
         f.render_stateful_widget(
             scrollbar,
-            list_area.inner(Margin { vertical: 1, horizontal: 0 }),
+            list_area.inner(Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
             &mut scroll_state,
         );
     }
@@ -482,10 +486,11 @@ fn render_diff_content(app: &mut App, f: &mut Frame, diff_area: Rect, zones: &mu
         .title(diff_title);
 
     let cache_width = diff_area.width.saturating_sub(2).max(1);
-    let cache_scroll_x = if app.log_ui.diff_mode == GitDiffMode::Unified && !app.wrap_diff {
-        app.log_ui.diff_scroll_x
-    } else {
-        0
+    let cache_scroll_x = match (app.log_ui.diff_mode, app.wrap_diff) {
+        (GitDiffMode::Unified, false) | (GitDiffMode::SideBySide, false) => {
+            app.log_ui.diff_scroll_x
+        }
+        _ => 0,
     };
     let cache_key = DiffRenderCacheKey {
         theme: app.theme,
@@ -574,7 +579,7 @@ fn render_diff_content(app: &mut App, f: &mut Frame, diff_area: Rect, zones: &mu
             })
             .sum::<usize>()
     } else {
-        app.log_ui.diff_lines.len()
+        app.log_diff_cache.lines.len()
     };
     // Scrollbar - use max scroll range so thumb reaches bottom
     let max_scroll_y = total_lines.saturating_sub(viewport_h).max(1);
@@ -584,10 +589,14 @@ fn render_diff_content(app: &mut App, f: &mut Frame, diff_area: Rect, zones: &mu
             .end_symbol(Some("▾"))
             .track_symbol(Some("│"))
             .thumb_symbol("█");
-        let mut scroll_state = ScrollbarState::new(max_scroll_y).position(app.log_ui.diff_scroll_y as usize);
+        let mut scroll_state =
+            ScrollbarState::new(max_scroll_y).position(app.log_ui.diff_scroll_y as usize);
         f.render_stateful_widget(
             scrollbar,
-            diff_area.inner(Margin { vertical: 1, horizontal: 0 }),
+            diff_area.inner(Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
             &mut scroll_state,
         );
     }
@@ -622,163 +631,23 @@ fn render_log_unified_diff(
     header_lines: &[String],
     diff_only_lines: &[String],
 ) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    let mut highlighter: Option<Highlighter> = None;
-
-    let content_w = diff_area.width.saturating_sub(2).max(1) as usize;
-
-    // Render commit header as styled text
-    for l in header_lines {
-        let t = l.as_str();
-        // Skip separator line
-        if t.starts_with("─") {
-            out.push(Line::from(vec![Span::styled(
-                "─".repeat(content_w),
-                Style::default().fg(app.palette.border_inactive),
-            )]));
-            continue;
-        }
-        // Subject line (first non-empty)
-        if out.is_empty() && !t.is_empty() {
-            out.push(Line::from(vec![Span::styled(
-                t.to_string(),
-                Style::default()
-                    .fg(app.palette.accent_primary)
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            continue;
-        }
-        // Body/meta lines
-        out.push(Line::from(vec![Span::styled(
-            t.to_string(),
-            Style::default().fg(app.palette.fg),
-        )]));
-    }
-    // Add spacing after header if there was content
-    if !header_lines.is_empty() && !diff_only_lines.is_empty() {
-        out.push(Line::from(vec![Span::raw("")]));
-    }
-
-    let mut first_file = true;
-    for l in diff_only_lines {
-        let t = l.as_str();
-
-        if app.syntax_highlight {
-            if let Some(p) = t.strip_prefix("+++ b/") {
-                let ext = std::path::Path::new(p).extension().and_then(|s| s.to_str());
-                highlighter = ext.and_then(new_highlighter);
-            }
-        }
-
-        // Hunk header with spacing
-        if t.starts_with("@@") {
-            // Add blank line before hunk for visual separation
-            out.push(Line::from(vec![Span::raw("")]));
-            out.push(Line::from(vec![Span::styled(
-                pad_to_width(t.to_string(), content_w),
-                Style::default()
-                    .fg(app.palette.accent_secondary)
-                    .bg(app.palette.diff_hunk_bg)
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            continue;
-        }
-
-        // File header with separator - show filename first
-        if t.starts_with("diff --git") {
-            // Add blank lines before new file (except first)
-            if !first_file {
-                out.push(Line::from(vec![Span::raw("")]));
-                out.push(Line::from(vec![Span::styled(
-                    "─".repeat(content_w),
-                    Style::default().fg(app.palette.border_inactive),
-                )]));
-            }
-            first_file = false;
-            let full_path = t
-                .strip_prefix("diff --git a/")
-                .and_then(|s| s.split(" b/").next())
-                .unwrap_or(t);
-            let (dir, filename) = match full_path.rfind('/') {
-                Some(i) => (&full_path[..i + 1], &full_path[i + 1..]),
-                None => ("", full_path),
-            };
-            let mut spans = vec![Span::styled(
-                format!("📄 {}", filename),
-                Style::default()
-                    .fg(app.palette.accent_primary)
-                    .add_modifier(Modifier::BOLD),
-            )];
-            if !dir.is_empty() {
-                spans.push(Span::styled(
-                    format!("  {}", dir),
-                    Style::default().fg(app.palette.border_inactive),
-                ));
-            }
-            out.push(Line::from(spans));
-            continue;
-        }
-
-        // Skip verbose meta lines
-        if t.starts_with("index ") || t.starts_with("--- ") || t.starts_with("+++ ") {
-            continue;
-        }
-
-        if t.starts_with("rename ") {
-            out.push(Line::from(vec![Span::styled(
-                pad_to_width(t.to_string(), content_w),
-                Style::default().fg(app.palette.accent_secondary),
-            )]));
-            continue;
-        }
-
-        let (prefix, code) = t.split_at(t.chars().next().map(|c| c.len_utf8()).unwrap_or(0));
-        let (bg, prefix_fg, is_code) = match prefix {
-            "+" if !t.starts_with("+++") => {
-                (app.palette.diff_add_bg, app.palette.diff_add_fg, true)
-            }
-            "-" if !t.starts_with("---") => {
-                (app.palette.diff_del_bg, app.palette.diff_del_fg, true)
-            }
-            " " => (app.palette.bg, app.palette.diff_gutter_fg, true),
-            _ => (app.palette.bg, app.palette.fg, false),
-        };
-
-        let fill = content_w.saturating_sub(display_width(t));
-
-        if is_code {
-            if let Some(hl) = highlighter.as_mut() {
-                let mut line = hl.highlight_diff_code_with_prefix(
-                    prefix,
-                    code,
-                    Style::default().fg(prefix_fg),
-                    bg,
-                );
-                if fill > 0 {
-                    line.spans
-                        .push(Span::styled(" ".repeat(fill), Style::default().bg(bg)));
-                }
-                out.push(line);
-            } else {
-                // Without syntax highlight, still color the prefix
-                let mut spans = vec![
-                    Span::styled(prefix.to_string(), Style::default().fg(prefix_fg).bg(bg)),
-                    Span::styled(code.to_string(), Style::default().fg(app.palette.fg).bg(bg)),
-                ];
-                if fill > 0 {
-                    spans.push(Span::styled(" ".repeat(fill), Style::default().bg(bg)));
-                }
-                out.push(Line::from(spans));
-            }
-        } else {
-            out.push(Line::from(vec![Span::styled(
-                pad_to_width(t.to_string(), content_w),
-                Style::default().fg(app.palette.fg).bg(bg),
-            )]));
-        }
-    }
-
-    out
+    let initial_path = app
+        .log_ui
+        .files
+        .get(app.log_ui.files_state.selected().unwrap_or(0))
+        .map(|file| file.path.as_str());
+    render_diff(DiffRenderConfig {
+        palette: app.palette,
+        mode: GitDiffMode::Unified,
+        content_width: diff_area.width.saturating_sub(2).max(1) as usize,
+        wrap: app.wrap_diff,
+        syntax_highlight: app.syntax_highlight,
+        scroll_x: app.log_ui.diff_scroll_x as usize,
+        initial_path,
+        header_lines,
+        diff_lines: diff_only_lines,
+        include_side_titles: false,
+    })
 }
 
 /// Render side-by-side diff for log view
@@ -788,378 +657,23 @@ fn render_log_side_by_side_diff(
     header_lines: &[String],
     diff_only_lines: &[String],
 ) -> Vec<Line<'static>> {
-    let rows = build_side_by_side_rows(diff_only_lines);
-    let mut out = Vec::new();
-    let inner = diff_area.inner(Margin {
-        vertical: 1,
-        horizontal: 1,
-    });
-    let total_w = inner.width as usize;
-    let sep_style = Style::default()
-        .fg(app.palette.border_inactive)
-        .bg(app.palette.bg);
-    let left_w = total_w.saturating_sub(1) / 2;
-    let right_w = total_w.saturating_sub(1) - left_w;
-
-    // If columns are too narrow, show message instead of garbled text
-    if left_w < 16 {
-        out.push(Line::from(vec![Span::styled(
-            "Window too narrow for side-by-side view",
-            Style::default().fg(app.palette.accent_secondary),
-        )]));
-        out.push(Line::from(vec![Span::styled(
-            "Press 's' to switch to unified mode, or widen the window",
-            Style::default().fg(app.palette.border_inactive),
-        )]));
-        return out;
-    }
-
-    // Render commit header as styled text first
-    for l in header_lines {
-        let t = l.as_str();
-        // Separator line
-        if t.starts_with("─") {
-            out.push(Line::from(vec![Span::styled(
-                "─".repeat(total_w),
-                Style::default().fg(app.palette.border_inactive),
-            )]));
-            continue;
-        }
-        // Subject line (first non-empty)
-        if out.is_empty() && !t.is_empty() {
-            out.push(Line::from(vec![Span::styled(
-                t.to_string(),
-                Style::default()
-                    .fg(app.palette.accent_primary)
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            continue;
-        }
-        // Body/meta lines
-        out.push(Line::from(vec![Span::styled(
-            t.to_string(),
-            Style::default().fg(app.palette.fg),
-        )]));
-    }
-    // Add spacing after header
-    if !header_lines.is_empty() && !diff_only_lines.is_empty() {
-        out.push(Line::from(vec![Span::raw("")]));
-    }
-
-    let wrap_cells = app.wrap_diff;
-    let scroll_x = if wrap_cells {
-        0
-    } else {
-        app.log_ui.diff_scroll_x as usize
-    };
-
-    let cell_lines = |cell: &git::GitDiffCell, width: usize| -> Vec<String> {
-        git::render_side_by_side_cell_lines(cell, width, scroll_x, wrap_cells)
-    };
-
-    let empty_left = " ".repeat(left_w);
-    let empty_right = " ".repeat(right_w);
-
-    let mut hl_old: Option<Highlighter> = None;
-    let mut hl_new: Option<Highlighter> = None;
-    let mut first_file = true;
-
-    for r in rows {
-        match r {
-            GitDiffRow::Meta(t) => {
-                if app.syntax_highlight {
-                    if let Some(p) = t.strip_prefix("+++ b/") {
-                        let ext = std::path::Path::new(p).extension().and_then(|s| s.to_str());
-                        hl_old = ext.and_then(new_highlighter);
-                        hl_new = ext.and_then(new_highlighter);
-                    }
-                }
-
-                // Hunk header with spacing
-                if t.starts_with("@@") {
-                    out.push(Line::from(vec![Span::raw("")]));
-                    out.push(Line::from(vec![Span::styled(
-                        pad_to_width(t, total_w),
-                        Style::default()
-                            .fg(app.palette.accent_secondary)
-                            .bg(app.palette.diff_hunk_bg)
-                            .add_modifier(Modifier::BOLD),
-                    )]));
-                    continue;
-                }
-
-                // File header with separator - show filename first
-                if t.starts_with("diff --git") {
-                    if !first_file {
-                        out.push(Line::from(vec![Span::raw("")]));
-                        out.push(Line::from(vec![Span::styled(
-                            "─".repeat(total_w),
-                            Style::default().fg(app.palette.border_inactive),
-                        )]));
-                    }
-                    first_file = false;
-                    let full_path = t
-                        .strip_prefix("diff --git a/")
-                        .and_then(|s| s.split(" b/").next())
-                        .unwrap_or(t.as_str());
-                    let (dir, filename) = match full_path.rfind('/') {
-                        Some(i) => (&full_path[..i + 1], &full_path[i + 1..]),
-                        None => ("", full_path),
-                    };
-                    let mut spans = vec![Span::styled(
-                        format!("📄 {}", filename),
-                        Style::default()
-                            .fg(app.palette.accent_primary)
-                            .add_modifier(Modifier::BOLD),
-                    )];
-                    if !dir.is_empty() {
-                        spans.push(Span::styled(
-                            format!("  {}", dir),
-                            Style::default().fg(app.palette.border_inactive),
-                        ));
-                    }
-                    out.push(Line::from(spans));
-                    continue;
-                }
-
-                // Skip verbose meta lines
-                if t.starts_with("index ") || t.starts_with("--- ") || t.starts_with("+++ ") {
-                    continue;
-                }
-
-                // Other meta lines (rename, etc.)
-                out.push(Line::from(vec![Span::styled(
-                    pad_to_width(t, total_w),
-                    Style::default().fg(app.palette.accent_secondary),
-                )]));
-            }
-            GitDiffRow::Split { old, new } => {
-                let old_style = match old.kind {
-                    GitDiffCellKind::Delete => Style::default()
-                        .fg(app.palette.fg)
-                        .bg(app.palette.diff_del_bg),
-                    GitDiffCellKind::Context => {
-                        Style::default().fg(app.palette.fg).bg(app.palette.bg)
-                    }
-                    GitDiffCellKind::Add => Style::default().fg(app.palette.fg).bg(app.palette.bg),
-                    GitDiffCellKind::Empty => Style::default()
-                        .fg(app.palette.border_inactive)
-                        .bg(app.palette.bg),
-                };
-                let new_style = match new.kind {
-                    GitDiffCellKind::Add => Style::default()
-                        .fg(app.palette.fg)
-                        .bg(app.palette.diff_add_bg),
-                    GitDiffCellKind::Context => {
-                        Style::default().fg(app.palette.fg).bg(app.palette.bg)
-                    }
-                    GitDiffCellKind::Delete => {
-                        Style::default().fg(app.palette.fg).bg(app.palette.bg)
-                    }
-                    GitDiffCellKind::Empty => Style::default()
-                        .fg(app.palette.border_inactive)
-                        .bg(app.palette.bg),
-                };
-
-                let old_lines = cell_lines(&old, left_w);
-                let new_lines = cell_lines(&new, right_w);
-                let n = old_lines.len().max(new_lines.len());
-
-                for i in 0..n {
-                    let old_cell = old_lines
-                        .get(i)
-                        .cloned()
-                        .unwrap_or_else(|| empty_left.clone());
-                    let new_cell = new_lines
-                        .get(i)
-                        .cloned()
-                        .unwrap_or_else(|| empty_right.clone());
-                    let old_bg = match old.kind {
-                        GitDiffCellKind::Delete => app.palette.diff_del_bg,
-                        GitDiffCellKind::Context | GitDiffCellKind::Add => app.palette.bg,
-                        GitDiffCellKind::Empty => app.palette.bg,
-                    };
-                    let new_bg = match new.kind {
-                        GitDiffCellKind::Add => app.palette.diff_add_bg,
-                        GitDiffCellKind::Context | GitDiffCellKind::Delete => app.palette.bg,
-                        GitDiffCellKind::Empty => app.palette.bg,
-                    };
-
-                    let old_cell = pad_to_width(old_cell, left_w);
-                    let new_cell = pad_to_width(new_cell, right_w);
-
-                    let (old_gutter, old_code) = old_cell.split_at(old_cell.len().min(6));
-                    let (new_gutter, new_code) = new_cell.split_at(new_cell.len().min(6));
-
-                    let mut spans: Vec<Span> = Vec::new();
-
-                    // Render old gutter with colored line number and marker
-                    if old_gutter.len() >= 5 {
-                        let (line_num, marker_space) = old_gutter.split_at(4);
-                        let (marker, space) = if marker_space.len() >= 2 {
-                            marker_space.split_at(1)
-                        } else {
-                            (marker_space, "")
-                        };
-                        spans.push(Span::styled(
-                            line_num.to_string(),
-                            Style::default().fg(app.palette.diff_gutter_fg).bg(old_bg),
-                        ));
-                        let marker_fg = if marker.trim() == "-" {
-                            app.palette.diff_del_fg
-                        } else {
-                            app.palette.diff_gutter_fg
-                        };
-                        spans.push(Span::styled(
-                            format!("{}{}", marker, space),
-                            Style::default().fg(marker_fg).bg(old_bg),
-                        ));
-                    } else {
-                        spans.push(Span::styled(
-                            old_gutter.to_string(),
-                            Style::default().fg(app.palette.diff_gutter_fg).bg(old_bg),
-                        ));
-                    }
-
-                    let old_has_arrow = old_code.ends_with('→');
-
-                    if app.syntax_highlight
-                        && old.kind != GitDiffCellKind::Empty
-                        && !old.text.trim().is_empty()
-                    {
-                        if let Some(hl) = hl_old.as_mut() {
-                            if !wrap_cells {
-                                // Highlight FULL line for correct parser state,
-                                // then clip the resulting spans to visible range
-                                let full_hl = hl.highlight_line(&old.text, old_bg);
-                                let vis_w = left_w.saturating_sub(6)
-                                    .saturating_sub(if old_has_arrow { 1 } else { 0 });
-                                let clipped = clip_line_spans(&full_hl.spans, scroll_x, vis_w);
-                                let hl_w: usize = clipped.iter()
-                                    .map(|s| display_width(s.content.as_ref()))
-                                    .sum();
-                                spans.extend(clipped);
-                                if hl_w < vis_w {
-                                    spans.push(Span::styled(
-                                        " ".repeat(vis_w - hl_w),
-                                        Style::default().bg(old_bg),
-                                    ));
-                                }
-                            } else {
-                                spans.extend(hl.highlight_line(old_code, old_bg).spans);
-                            }
-                        } else {
-                            let plain = if old_has_arrow {
-                                &old_code[..old_code.len() - '→'.len_utf8()]
-                            } else {
-                                old_code
-                            };
-                            spans.push(Span::styled(plain.to_string(), old_style));
-                        }
-                    } else {
-                        let plain = if old_has_arrow {
-                            &old_code[..old_code.len() - '→'.len_utf8()]
-                        } else {
-                            old_code
-                        };
-                        spans.push(Span::styled(plain.to_string(), old_style));
-                    }
-                    if old_has_arrow {
-                        spans.push(Span::styled(
-                            "→",
-                            Style::default()
-                                .fg(app.palette.border_inactive)
-                                .bg(old_bg),
-                        ));
-                    }
-
-                    spans.push(Span::styled("│", sep_style));
-
-                    // Render new gutter with colored line number and marker
-                    if new_gutter.len() >= 5 {
-                        let (line_num, marker_space) = new_gutter.split_at(4);
-                        let (marker, space) = if marker_space.len() >= 2 {
-                            marker_space.split_at(1)
-                        } else {
-                            (marker_space, "")
-                        };
-                        spans.push(Span::styled(
-                            line_num.to_string(),
-                            Style::default().fg(app.palette.diff_gutter_fg).bg(new_bg),
-                        ));
-                        let marker_fg = if marker.trim() == "+" {
-                            app.palette.diff_add_fg
-                        } else {
-                            app.palette.diff_gutter_fg
-                        };
-                        spans.push(Span::styled(
-                            format!("{}{}", marker, space),
-                            Style::default().fg(marker_fg).bg(new_bg),
-                        ));
-                    } else {
-                        spans.push(Span::styled(
-                            new_gutter.to_string(),
-                            Style::default().fg(app.palette.diff_gutter_fg).bg(new_bg),
-                        ));
-                    }
-
-                    let new_has_arrow = new_code.ends_with('→');
-
-                    if app.syntax_highlight
-                        && new.kind != GitDiffCellKind::Empty
-                        && !new.text.trim().is_empty()
-                    {
-                        if let Some(hl) = hl_new.as_mut() {
-                            if !wrap_cells {
-                                let full_hl = hl.highlight_line(&new.text, new_bg);
-                                let vis_w = right_w.saturating_sub(6)
-                                    .saturating_sub(if new_has_arrow { 1 } else { 0 });
-                                let clipped = clip_line_spans(&full_hl.spans, scroll_x, vis_w);
-                                let hl_w: usize = clipped.iter()
-                                    .map(|s| display_width(s.content.as_ref()))
-                                    .sum();
-                                spans.extend(clipped);
-                                if hl_w < vis_w {
-                                    spans.push(Span::styled(
-                                        " ".repeat(vis_w - hl_w),
-                                        Style::default().bg(new_bg),
-                                    ));
-                                }
-                            } else {
-                                spans.extend(hl.highlight_line(new_code, new_bg).spans);
-                            }
-                        } else {
-                            let plain = if new_has_arrow {
-                                &new_code[..new_code.len() - '→'.len_utf8()]
-                            } else {
-                                new_code
-                            };
-                            spans.push(Span::styled(plain.to_string(), new_style));
-                        }
-                    } else {
-                        let plain = if new_has_arrow {
-                            &new_code[..new_code.len() - '→'.len_utf8()]
-                        } else {
-                            new_code
-                        };
-                        spans.push(Span::styled(plain.to_string(), new_style));
-                    }
-                    if new_has_arrow {
-                        spans.push(Span::styled(
-                            "→",
-                            Style::default()
-                                .fg(app.palette.border_inactive)
-                                .bg(new_bg),
-                        ));
-                    }
-
-                    out.push(Line::from(spans));
-                }
-            }
-        }
-    }
-
-    out
+    let initial_path = app
+        .log_ui
+        .files
+        .get(app.log_ui.files_state.selected().unwrap_or(0))
+        .map(|file| file.path.as_str());
+    render_diff(DiffRenderConfig {
+        palette: app.palette,
+        mode: GitDiffMode::SideBySide,
+        content_width: diff_area.width.saturating_sub(2).max(1) as usize,
+        wrap: app.wrap_diff,
+        syntax_highlight: app.syntax_highlight,
+        scroll_x: app.log_ui.diff_scroll_x as usize,
+        initial_path,
+        header_lines,
+        diff_lines: diff_only_lines,
+        include_side_titles: true,
+    })
 }
 
 // Helper functions for decoration rendering

@@ -43,10 +43,7 @@ pub fn render_explorer_tab(
             // Two columns: Current (40%) | Preview (60%)
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(40),
-                    Constraint::Percentage(60),
-                ])
+                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
                 .split(content_area);
 
             app.explorer_parent_x = 0;
@@ -72,7 +69,8 @@ fn render_parent_pane(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mu
     let parent_path = app.current_path.parent();
 
     let title = if let Some(p) = parent_path {
-        let name = p.file_name()
+        let name = p
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "/".to_string());
         format!(" {} ", name)
@@ -100,12 +98,10 @@ fn render_parent_pane(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mu
                         (name, is_dir, is_current)
                     })
                     .collect();
-                items.sort_by(|a, b| {
-                    match (a.1, b.1) {
-                        (true, false) => std::cmp::Ordering::Less,
-                        (false, true) => std::cmp::Ordering::Greater,
-                        _ => a.0.to_lowercase().cmp(&b.0.to_lowercase()),
-                    }
+                items.sort_by(|a, b| match (a.1, b.1) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => a.0.to_lowercase().cmp(&b.0.to_lowercase()),
                 });
                 items
             })
@@ -127,7 +123,9 @@ fn render_parent_pane(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mu
             let (text_style, item_style) = if *is_current {
                 // Highlight current directory with background like Yazi
                 (
-                    Style::default().fg(app.palette.accent_primary).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(app.palette.accent_primary)
+                        .add_modifier(Modifier::BOLD),
                     Style::default().bg(app.palette.selection_bg),
                 )
             } else {
@@ -137,7 +135,8 @@ fn render_parent_pane(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mu
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", icon), text_style),
                 Span::styled(name.clone(), text_style),
-            ])).style(item_style)
+            ]))
+            .style(item_style)
         })
         .collect();
 
@@ -145,7 +144,10 @@ fn render_parent_pane(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mu
     f.render_widget(list, area);
 
     // Add click zones for parent directory items
-    let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
     if let Some(parent) = parent_path {
         for (i, (name, is_dir, _)) in parent_entries.iter().enumerate() {
             if i >= inner.height as usize {
@@ -177,9 +179,7 @@ fn render_file_list(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mut 
         .iter()
         .map(|file| {
             // File type icons and colors (like Yazi)
-            let ext = file.path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
             let (icon, color) = if file.is_dir {
                 ("", app.palette.dir_color)
@@ -190,24 +190,26 @@ fn render_file_list(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mut 
             } else {
                 match ext {
                     // Rust
-                    "rs" => ("", Color::Rgb(255, 140, 90)),  // Orange
+                    "rs" => ("", Color::Rgb(255, 140, 90)), // Orange
                     // Python
-                    "py" => ("", Color::Rgb(80, 200, 120)),  // Green
+                    "py" => ("", Color::Rgb(80, 200, 120)), // Green
                     // JavaScript/TypeScript
-                    "js" | "jsx" => ("", Color::Rgb(240, 220, 80)),  // Yellow
-                    "ts" | "tsx" => ("", Color::Rgb(80, 160, 240)),  // Blue
+                    "js" | "jsx" => ("", Color::Rgb(240, 220, 80)), // Yellow
+                    "ts" | "tsx" => ("", Color::Rgb(80, 160, 240)), // Blue
                     // Web
-                    "html" | "htm" => ("", Color::Rgb(230, 120, 80)),  // Orange
-                    "css" | "scss" | "sass" => ("", Color::Rgb(80, 160, 240)),  // Blue
+                    "html" | "htm" => ("", Color::Rgb(230, 120, 80)), // Orange
+                    "css" | "scss" | "sass" => ("", Color::Rgb(80, 160, 240)), // Blue
                     // Config
-                    "json" => ("", Color::Rgb(200, 180, 100)),  // Yellow
-                    "toml" | "yaml" | "yml" => ("", Color::Rgb(180, 140, 200)),  // Purple
+                    "json" => ("", Color::Rgb(200, 180, 100)), // Yellow
+                    "toml" | "yaml" | "yml" => ("", Color::Rgb(180, 140, 200)), // Purple
                     // Docs
-                    "md" | "txt" => ("", Color::Rgb(180, 180, 180)),  // Gray
+                    "md" | "txt" => ("", Color::Rgb(180, 180, 180)), // Gray
                     // Shell
-                    "sh" | "bash" | "zsh" => ("", Color::Rgb(80, 200, 120)),  // Green
+                    "sh" | "bash" | "zsh" => ("", Color::Rgb(80, 200, 120)), // Green
                     // Images
-                    "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" => ("", Color::Rgb(200, 120, 200)),
+                    "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" => {
+                        ("", Color::Rgb(200, 120, 200))
+                    }
                     // Archives
                     "zip" | "tar" | "gz" | "7z" | "rar" => ("", Color::Rgb(200, 160, 80)),
                     // Default
@@ -414,7 +416,10 @@ fn render_preview(app: &mut App, f: &mut Frame, area: Rect, click_zones: &mut Ve
             let mut scroll_state = ScrollbarState::new(max_scroll.max(1)).position(clamped_scroll);
             f.render_stateful_widget(
                 scrollbar,
-                area.inner(Margin { vertical: 1, horizontal: 0 }),
+                area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
                 &mut scroll_state,
             );
         }

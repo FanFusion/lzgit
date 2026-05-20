@@ -46,7 +46,9 @@ pub enum PreviewResult {
         #[allow(dead_code)]
         path: PathBuf,
         content: String,
+        #[allow(dead_code)]
         start_line: usize,
+        #[allow(dead_code)]
         lines_loaded: usize,
         has_more_before: bool,
         has_more_after: bool,
@@ -120,6 +122,7 @@ impl PreviewLoader {
     /// Request a specific range of lines for preview (streaming mode).
     ///
     /// Returns a `CancellationToken` that can be used to cancel this request.
+    #[allow(dead_code)]
     pub fn request_preview_range(
         &self,
         path: PathBuf,
